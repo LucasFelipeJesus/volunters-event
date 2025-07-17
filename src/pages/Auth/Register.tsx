@@ -27,7 +27,7 @@ const schema = yup.object({
 
 type FormData = yup.InferType<typeof schema>;
 
-export default function Register() {
+export function Register() {
   const { signUp } = useAuth();
   const navigate = useNavigate();
   const [showPassword, setShowPassword] = useState(false);
