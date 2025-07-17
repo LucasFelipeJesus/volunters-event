@@ -80,7 +80,7 @@ export const getUserRole = async (userId: string): Promise<string | null> => {
 
 export const isOrganizer = async (userId: string): Promise<boolean> => {
   const role = await getUserRole(userId)
-  return role === 'organizer' || role === 'admin'
+  return role === 'captain' || role === 'admin'
 }
 
 export const isAdmin = async (userId: string): Promise<boolean> => {

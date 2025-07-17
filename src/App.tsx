@@ -31,11 +31,7 @@ function App() {
             <Route path="events" element={<EventsList />} />
             <Route path="registrations" element={<div>Minhas Inscrições</div>} />
             <Route path="profile" element={<div>Perfil</div>} />
-            <Route path="events/create" element={
-              <ProtectedRoute requiredRole="organizer">
-                <div>Criar Evento</div>
-              </ProtectedRoute>
-            } />
+            <Route path="events/create" element={<div>Criar Evento</div>} />
           </Route>
           
           {/* Fallback */}

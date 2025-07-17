@@ -132,7 +132,7 @@ export const Dashboard: React.FC = () => {
             Bem-vindo ao seu dashboard de voluntariado
           </p>
         </div>
-        {user?.role === 'organizer' || user?.role === 'admin' ? (
+        {user?.role === 'captain' || user?.role === 'admin' ? (
           <Link
             to="/events/create"
             className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
