@@ -1,6 +1,5 @@
-import React from 'react'
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
-import { AuthProvider } from './contexts/AuthContext'
+import AuthProvider from './contexts/AuthProvider'
 import { Layout } from './components/Layout'
 import { ProtectedRoute } from './components/ProtectedRoute'
 
@@ -11,6 +10,21 @@ import { Register } from './pages/Auth/Register'
 // Main Pages
 import { Dashboard } from './pages/Dashboard/Dashboard'
 import { EventsList } from './pages/Events/EventsList'
+import { CreateEvent } from './pages/Events/CreateEvent'
+import { EventDetails } from './pages/Events/EventDetails'
+import { EventTermsManager } from './pages/Events/EventTermsManager'
+import { CreateTeam } from './pages/Teams/CreateTeam'
+import { EditTeam } from './pages/Teams/EditTeam'
+import { TeamsManagement } from './pages/Teams/TeamsManagement'
+import { Profile } from './pages/Profile/Profile'
+import { VolunteerDashboard } from './pages/Volunteer/VolunteerDashboard'
+
+// Admin Pages
+import { AdminUsersManagement } from './pages/Admin/UsersManagement'
+
+// Diagnostic Components
+import { AuthDiagnostic } from './components/AuthDiagnostic'
+import { ProfileCreationTest } from './components/ProfileCreationTest'
 
 function App() {
   return (
@@ -28,12 +42,22 @@ function App() {
             </ProtectedRoute>
           }>
             <Route index element={<Dashboard />} />
+            <Route path="volunteer" element={<VolunteerDashboard />} />
             <Route path="events" element={<EventsList />} />
-            <Route path="registrations" element={<div>Minhas Inscrições</div>} />
-            <Route path="profile" element={<div>Perfil</div>} />
-            <Route path="events/create" element={<div>Criar Evento</div>} />
+            <Route path="events/create" element={<CreateEvent />} />
+            <Route path="events/:id" element={<EventDetails />} />
+            <Route path="events/:eventId/terms" element={<EventTermsManager />} />
+            <Route path="teams" element={<TeamsManagement />} />
+            <Route path="teams/create" element={<CreateTeam />} />
+            <Route path="teams/:id/edit" element={<EditTeam />} />
+            <Route path="admin/users" element={<AdminUsersManagement />} />
+            <Route path="profile" element={<Profile />} />
           </Route>
           
+          {/* Diagnostic Route - Access without authentication for debugging */}
+          <Route path="/diagnostic" element={<AuthDiagnostic />} />
+          <Route path="/test-profile" element={<ProfileCreationTest />} />
+
           {/* Fallback */}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

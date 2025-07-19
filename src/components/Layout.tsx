@@ -1,17 +1,15 @@
 import React from 'react'
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom'
-import { useAuth } from '../contexts/AuthContext'
+import { useAuth } from '../hooks/useAuth'
 import { 
   Home, 
   Calendar, 
   Users, 
   User, 
-  Settings,
   LogOut,
-  Bell,
-  Plus,
   Menu,
-  X
+  X,
+  UserCog
 } from 'lucide-react'
 import { useState } from 'react'
 
@@ -23,17 +21,22 @@ export const Layout: React.FC = () => {
 
   const handleSignOut = async () => {
     try {
-      await signOut()
+      // Navega imediatamente para dar feedback visual instantâneo
       navigate('/login')
+      // Executa logout em background
+      await signOut()
     } catch (error) {
+      // Log do erro mas não impacta UX
       console.error('Erro ao fazer logout:', error)
     }
   }
 
   const navigation = [
     { name: 'Dashboard', href: '/', icon: Home },
-    { name: 'Eventos', href: '/events', icon: Calendar },
-    { name: 'Minhas Inscrições', href: '/registrations', icon: Users },
+    ...(user?.role === 'volunteer' ? [{ name: 'Meu Painel', href: '/volunteer', icon: User }] : []),
+    ...(user?.role === 'admin' || user?.role === 'captain' ? [{ name: 'Eventos', href: '/events', icon: Calendar }] : []),
+    ...(user?.role === 'admin' ? [{ name: 'Equipes', href: '/teams', icon: Users }] : []),
+    ...(user?.role === 'admin' ? [{ name: 'Gerenciar Usuários', href: '/admin/users', icon: UserCog }] : []),
     { name: 'Perfil', href: '/profile', icon: User },
   ]
 
@@ -75,21 +78,6 @@ export const Layout: React.FC = () => {
 
             {/* User Menu */}
             <div className="flex items-center space-x-4">
-              {user?.role === 'captain' || user?.role === 'admin' ? (
-                <Link
-                  to="/events/create"
-                  className="flex items-center space-x-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                >
-                  <Plus className="w-4 h-4" />
-                  <span>Criar Evento</span>
-                </Link>
-              ) : null}
-
-              <button className="relative p-2 text-gray-600 hover:text-gray-900 transition-colors">
-                <Bell className="w-5 h-5" />
-                <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full"></span>
-              </button>
-
               <div className="hidden md:flex items-center space-x-3">
                 <div className="text-right">
                   <p className="text-sm font-medium text-gray-900">{user?.full_name}</p>

@@ -1,0 +1,146 @@
+/**
+ * Utilitário de diagnóstico para problemas de perfil de usuário
+ */
+
+import { supabase } from '../lib/supabase'
+
+// Função utilitária para adicionar timeout
+function withTimeout<T>(promise: Promise<T>, ms: number, operation: string): Promise<T> {
+    const timeout = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error(`Timeout em ${operation} após ${ms}ms`)), ms)
+    )
+    return Promise.race([promise, timeout])
+}
+
+export async function diagnoseUserProfile(userId: string): Promise<void> {
+    console.log('🔧 [DIAGNOSTIC] INÍCIO - Verificando problemas de perfil para userId:', userId)
+
+    try {
+        // 1. Verificar se a sessão está ativa
+        console.log('🔑 [DIAGNOSTIC] Verificando sessão...')
+
+        try {
+            const { data: session, error: sessionError } = await withTimeout(
+                supabase.auth.getSession(),
+                5000,
+                'verificação de sessão'
+            )
+
+            if (sessionError) {
+                console.error('❌ [DIAGNOSTIC] Erro ao obter sessão:', sessionError)
+                return
+            }
+
+            console.log('🔑 [DIAGNOSTIC] Sessão ativa:', !!session.session?.user)
+            console.log('📧 [DIAGNOSTIC] Email da sessão:', session.session?.user?.email)
+            console.log('🆔 [DIAGNOSTIC] ID da sessão:', session.session?.user?.id)
+        } catch (timeoutError) {
+            console.error('⏰ [DIAGNOSTIC] TIMEOUT na verificação de sessão:', timeoutError)
+            return
+        }
+
+        // 2. Verificar se conseguimos acessar a tabela users
+        console.log('🔍 [DIAGNOSTIC] Testando acesso à tabela users...')
+
+        try {
+            // Usar timeout apenas em Promise.resolve para evitar problemas de tipo
+            const timeoutPromise = new Promise((_, reject) => {
+                setTimeout(() => reject(new Error('Timeout na consulta users')), 5000)
+            })
+
+            const queryPromise = supabase.from('users').select('id, email, created_at').limit(1)
+
+            const result = await Promise.race([queryPromise, timeoutPromise])
+            const { data: users, error: usersError } = result as { data: Array<{ id: string; email: string; created_at: string }> | null; error: Error | null }
+
+            if (usersError) {
+                console.error('❌ [DIAGNOSTIC] Erro ao acessar tabela users:', usersError)
+                console.log('💡 [DIAGNOSTIC] Possíveis causas do erro:')
+
+                if (usersError.message?.includes('permission denied')) {
+                    console.log('   - Problema de RLS (Row Level Security)')
+                    console.log('   - Usuário não autenticado ou sem permissões')
+                } else if (usersError.message?.includes('500')) {
+                    console.log('   - Erro interno do servidor Supabase')
+                    console.log('   - Possível problema na configuração do banco')
+                } else {
+                    console.log('   - Erro desconhecido:', usersError.message)
+                }
+
+                // Continuar diagnóstico mesmo com erro na tabela users
+            } else {
+                console.log('✅ [DIAGNOSTIC] Tabela users acessível, encontrados:', users?.length || 0, 'usuários')
+            }
+        } catch (timeoutError) {
+            console.error('⏰ [DIAGNOSTIC] TIMEOUT ao acessar tabela users:', timeoutError)
+            console.log('💡 [DIAGNOSTIC] A consulta à tabela users está travando - possível problema de RLS ou conexão')
+            // Continuar diagnóstico mesmo com timeout
+        }
+
+        // 3. Verificar se o usuário específico existe
+        console.log('🎯 [DIAGNOSTIC] Procurando usuário específico:', userId)
+
+        const { data: specificUser, error: specificError } = await supabase
+            .from('users')
+            .select('*')
+            .eq('id', userId)
+            .single()
+
+        if (specificError) {
+            console.error('❌ [DIAGNOSTIC] Erro ao buscar usuário específico:', specificError)
+
+            if (specificError.code === 'PGRST116') {
+                console.log('💡 [DIAGNOSTIC] Usuário não existe na tabela users')
+                console.log('🔧 [DIAGNOSTIC] SOLUÇÃO: Criar perfil manualmente ou verificar processo de registro')
+            } else {
+                console.log('💡 [DIAGNOSTIC] Possível problema de RLS ou permissões')
+            }
+        } else {
+            console.log('✅ [DIAGNOSTIC] Usuário encontrado:', {
+                email: specificUser.email,
+                role: specificUser.role,
+                isActive: specificUser.is_active
+            })
+        }
+
+        console.log('🏁 [DIAGNOSTIC] FIM - Diagnóstico concluído')
+
+    } catch (error) {
+        console.error('❌ [DIAGNOSTIC] Erro durante diagnóstico:', error)
+    } finally {
+        console.log('🔄 [DIAGNOSTIC] Diagnóstico finalizado, retornando ao fluxo principal')
+    }
+}
+
+// Função para criar perfil manualmente se não existir
+export async function createMissingUserProfile(userId: string, email: string) {
+    console.log('🔨 [CREATE_PROFILE] Criando perfil faltante para:', email)
+
+    try {
+        const { data, error } = await supabase
+            .from('users')
+            .insert({
+                id: userId,
+                email: email,
+                full_name: email.split('@')[0], // Nome baseado no email
+                role: 'volunteer',
+                is_first_login: true,
+                is_active: true,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+            })
+            .select()
+            .single()
+
+        if (error) {
+            console.error('❌ [CREATE_PROFILE] Erro ao criar perfil:', error)
+            return null
+        }
+
+        console.log('✅ [CREATE_PROFILE] Perfil criado com sucesso:', data)
+        return data
+    } catch (error) {
+        console.error('❌ [CREATE_PROFILE] Erro inesperado ao criar perfil:', error)
+        return null
+    }
+}

@@ -1,10 +1,10 @@
-import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { useForm } from 'react-hook-form';
-import { yupResolver } from '@hookform/resolvers/yup';
-import * as yup from 'yup';
-import { UserPlus, Mail, Lock, User, Eye, EyeOff } from 'lucide-react';
-import { useAuth } from '../../contexts/AuthContext';
+import { useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
+import { useForm } from 'react-hook-form'
+import { yupResolver } from '@hookform/resolvers/yup'
+import * as yup from 'yup'
+import { UserPlus, Mail, Lock, User, Eye, EyeOff } from 'lucide-react'
+import { useAuth } from '../../hooks/useAuth'
 
 const schema = yup.object({
   email: yup
@@ -51,18 +51,23 @@ export function Register() {
       await signUp(data.email, data.password, data.fullName);
       setMessage({
         type: 'success',
-        text: 'Conta criada com sucesso! Verifique seu email para confirmar a conta.',
+        text: 'Conta criada com sucesso! Redirecionando para o login...',
       });
       
-      // Redirect to login after 3 seconds
+      // Redirect to login after 2 seconds
       setTimeout(() => {
-        navigate('/login');
-      }, 3000);
-    } catch (error: any) {
+        navigate('/login', {
+          state: {
+            email: data.email,
+            message: 'Conta criada com sucesso! Faça login para continuar.'
+          }
+        });
+      }, 2000);
+    } catch (error) {
       console.error('Erro no registro:', error);
       setMessage({
         type: 'error',
-        text: error.message || 'Erro ao criar conta. Tente novamente.',
+        text: error instanceof Error ? error.message : 'Erro ao criar conta. Tente novamente.',
       });
     } finally {
       setIsLoading(false);

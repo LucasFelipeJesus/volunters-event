@@ -1,10 +1,10 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { yupResolver } from '@hookform/resolvers/yup'
 import * as yup from 'yup'
-import { useAuth } from '../../contexts/AuthContext'
-import { Users, Eye, EyeOff, AlertCircle } from 'lucide-react'
+import { useAuth } from '../../hooks/useAuth'
+import { Users, Eye, EyeOff, AlertCircle, CheckCircle } from 'lucide-react'
 
 const schema = yup.object().shape({
   email: yup.string().email('Email inválido').required('Email é obrigatório'),
@@ -23,31 +23,62 @@ export const Login: React.FC = () => {
   const [showPassword, setShowPassword] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [successMessage, setSuccessMessage] = useState<string | null>(null)
 
   const from = location.state?.from?.pathname || '/'
+  const emailFromRegister = location.state?.email || ''
+  const messageFromRegister = location.state?.message || ''
 
   const {
     register,
     handleSubmit,
+    setValue,
     formState: { errors }
   } = useForm<FormData>({
     resolver: yupResolver(schema)
   })
+
+  // Detectar dados vindos do registro e configurar mensagem de sucesso
+  useEffect(() => {
+    if (messageFromRegister) {
+      setSuccessMessage(messageFromRegister)
+      // Limpar mensagem após 5 segundos
+      setTimeout(() => setSuccessMessage(null), 5000)
+    }
+    if (emailFromRegister) {
+      setValue('email', emailFromRegister)
+    }
+  }, [messageFromRegister, emailFromRegister, setValue])
 
   const onSubmit = async (data: FormData) => {
     setIsLoading(true)
     setError(null)
 
     try {
+      console.log('🚀 Iniciando processo de login para:', data.email)
       await signIn(data.email, data.password)
+      console.log('✅ Login realizado com sucesso, redirecionando...')
       navigate(from, { replace: true })
-    } catch (error: any) {
-      // Tratar erro de email não confirmado
-      if (error.message?.includes('Email not confirmed')) {
-        setError('Por favor, confirme seu email antes de fazer login. Verifique sua caixa de entrada e spam.')
-      } else {
-        setError(error.message || 'Erro ao fazer login')
+    } catch (error) {
+      console.error('❌ Erro capturado na página de login:', error)
+
+      // Mensagens específicas baseadas no tipo de erro
+      let errorMessage = 'Erro ao fazer login'
+
+      if (error instanceof Error && error.message) {
+        if (error.message.includes('Invalid login credentials')) {
+          errorMessage = '🔐 Email ou senha incorretos. Verifique suas credenciais.'
+        } else if (error.message.includes('Too many requests')) {
+          errorMessage = '⏰ Muitas tentativas de login. Tente novamente em alguns minutos.'
+        } else if (error.message.includes('User not found')) {
+          errorMessage = '👤 Usuário não encontrado. Verifique o email ou cadastre-se.'
+        } else {
+          errorMessage = error.message
+        }
       }
+
+      setError(errorMessage)
+      console.log('💡 Dica: Para testar o admin, use email: admin@sistema.com')
     } finally {
       setIsLoading(false)
     }
@@ -77,6 +108,17 @@ export const Login: React.FC = () => {
         </div>
 
         <form className="mt-8 space-y-6" onSubmit={handleSubmit(onSubmit)}>
+          {successMessage && (
+            <div className="bg-green-50 border border-green-200 rounded-md p-4">
+              <div className="flex">
+                <CheckCircle className="h-5 w-5 text-green-400" />
+                <div className="ml-3">
+                  <p className="text-sm text-green-700">{successMessage}</p>
+                </div>
+              </div>
+            </div>
+          )}
+
           {error && (
             <div className="bg-red-50 border border-red-200 rounded-md p-4">
               <div className="flex">

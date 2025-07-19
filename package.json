@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "setup-admin": "node -e \"console.log('🚀 Para configurar o administrador inicial:'); console.log('1. Execute: npx supabase migration up'); console.log('2. Acesse o Dashboard do Supabase'); console.log('3. Vá para Authentication > Users'); console.log('4. Crie usuário: admin@sistema.com'); console.log('5. Consulte SETUP-INICIAL.md para detalhes'); console.log(''); console.log('💡 Ou execute o script interativo em src/utils/adminSetup.ts');\""
   },
   "dependencies": {
     "@hookform/resolvers": "^5.1.1",

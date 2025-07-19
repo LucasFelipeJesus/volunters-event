@@ -1,16 +1,18 @@
 import React, { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import { supabase, Event } from '../../lib/supabase'
-import { useAuth } from '../../contexts/AuthContext'
+import { supabase, Event, EventRegistration } from '../../lib/supabase'
+import { useAuth } from '../../hooks/useAuth'
 import { 
   Calendar, 
   MapPin, 
   Users, 
   Search,
-  Filter,
   Plus,
   Clock,
-  Tag
+  Tag,
+  TrendingUp,
+  CheckCircle,
+  AlertCircle
 } from 'lucide-react'
 
 export const EventsList: React.FC = () => {
@@ -20,10 +22,70 @@ export const EventsList: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('')
   const [filterStatus, setFilterStatus] = useState<string>('all')
   const [filterCategory, setFilterCategory] = useState<string>('all')
+  const [stats, setStats] = useState({
+    totalEvents: 0,
+    activeEvents: 0,
+    completedEvents: 0,
+    totalVolunteers: 0,
+    availableSpots: 0,
+    occupancyRate: 0
+  })
 
   useEffect(() => {
     fetchEvents()
+    fetchStats()
   }, [])
+
+  const fetchStats = async () => {
+    try {
+      // Buscar estatísticas dos eventos
+      const { data: eventsData, error: eventsError } = await supabase
+        .from('events')
+        .select(`
+          *,
+          teams(current_volunteers, max_volunteers),
+          event_registrations(id, status)
+        `)
+
+      if (eventsError) throw eventsError
+
+      // Calcular estatísticas
+      const totalEvents = eventsData?.length || 0
+      const activeEvents = eventsData?.filter(e => e.status === 'published' && new Date(e.event_date) >= new Date()).length || 0
+      const completedEvents = eventsData?.filter(e => e.status === 'completed' || new Date(e.event_date) < new Date()).length || 0
+
+      let totalVolunteers = 0
+      let totalMaxVolunteers = 0
+
+      eventsData?.forEach(event => {
+        // Contar voluntários das inscrições diretas (confirmadas)
+        const directRegistrations = event.event_registrations?.filter((reg: EventRegistration) => reg.status === 'confirmed').length || 0
+
+        // Contar voluntários das equipes já formadas
+        const teamVolunteers = event.teams?.reduce((sum: number, team: { current_volunteers: number }) => sum + team.current_volunteers, 0) || 0
+
+        // Total de voluntários = inscrições diretas + voluntários em equipes
+        totalVolunteers += directRegistrations + teamVolunteers
+
+        // Usar max_volunteers do evento como limite máximo
+        totalMaxVolunteers += event.max_volunteers || 0
+      })
+
+      const availableSpots = totalMaxVolunteers - totalVolunteers
+      const occupancyRate = totalMaxVolunteers > 0 ? Math.round((totalVolunteers / totalMaxVolunteers) * 100) : 0
+
+      setStats({
+        totalEvents,
+        activeEvents,
+        completedEvents,
+        totalVolunteers,
+        availableSpots,
+        occupancyRate
+      })
+    } catch (error) {
+      console.error('Erro ao buscar estatísticas:', error)
+    }
+  }
 
   const fetchEvents = async () => {
     try {
@@ -31,10 +93,12 @@ export const EventsList: React.FC = () => {
         .from('events')
         .select(`
           *,
-          organizer:users!events_organizer_id_fkey(*)
+          admin:users!events_admin_id_fkey(*),
+          teams(current_volunteers, max_volunteers),
+          event_registrations(id, status)
         `)
         .eq('status', 'published')
-        .order('date', { ascending: true })
+        .order('event_date', { ascending: true })
 
       if (error) throw error
       setEvents(data || [])
@@ -69,7 +133,19 @@ export const EventsList: React.FC = () => {
   }
 
   const isEventFull = (event: Event) => {
-    return event.current_volunteers >= event.max_volunteers
+    // Contar voluntários das inscrições diretas (confirmadas)
+    const directRegistrations = event.event_registrations?.filter((reg: EventRegistration) => reg.status === 'confirmed').length || 0
+
+    // Contar voluntários das equipes já formadas
+    const teamVolunteers = event.teams?.reduce((sum, team) => sum + team.current_volunteers, 0) || 0
+
+    // Total de voluntários = inscrições diretas + voluntários em equipes
+    const totalCurrentVolunteers = directRegistrations + teamVolunteers
+
+    // Usar max_volunteers do evento como limite máximo
+    const totalMaxVolunteers = event.max_volunteers || 0
+
+    return totalCurrentVolunteers >= totalMaxVolunteers
   }
 
   if (loading) {
@@ -101,6 +177,90 @@ export const EventsList: React.FC = () => {
         ) : null}
       </div>
 
+      {/* Panorama Geral - Statistics Dashboard */}
+      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+        <h2 className="text-xl font-semibold text-gray-900 mb-6">Panorama Geral</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-6">
+          {/* Total de Eventos */}
+          <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
+            <div className="flex items-center space-x-3">
+              <div className="bg-blue-100 p-2 rounded-lg">
+                <Calendar className="w-6 h-6 text-blue-600" />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-blue-600">Total de Eventos</p>
+                <p className="text-2xl font-bold text-blue-900">{stats.totalEvents}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Eventos Ativos */}
+          <div className="bg-green-50 rounded-lg p-4 border border-green-200">
+            <div className="flex items-center space-x-3">
+              <div className="bg-green-100 p-2 rounded-lg">
+                <CheckCircle className="w-6 h-6 text-green-600" />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-green-600">Eventos Ativos</p>
+                <p className="text-2xl font-bold text-green-900">{stats.activeEvents}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Eventos Concluídos */}
+          <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+            <div className="flex items-center space-x-3">
+              <div className="bg-gray-100 p-2 rounded-lg">
+                <AlertCircle className="w-6 h-6 text-gray-600" />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-gray-600">Concluídos</p>
+                <p className="text-2xl font-bold text-gray-900">{stats.completedEvents}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Total de Voluntários */}
+          <div className="bg-purple-50 rounded-lg p-4 border border-purple-200">
+            <div className="flex items-center space-x-3">
+              <div className="bg-purple-100 p-2 rounded-lg">
+                <Users className="w-6 h-6 text-purple-600" />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-purple-600">Voluntários Alocados</p>
+                <p className="text-2xl font-bold text-purple-900">{stats.totalVolunteers}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Vagas Disponíveis */}
+          <div className="bg-yellow-50 rounded-lg p-4 border border-yellow-200">
+            <div className="flex items-center space-x-3">
+              <div className="bg-yellow-100 p-2 rounded-lg">
+                <TrendingUp className="w-6 h-6 text-yellow-600" />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-yellow-600">Vagas Disponíveis</p>
+                <p className="text-2xl font-bold text-yellow-900">{stats.availableSpots}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Taxa de Ocupação */}
+          <div className="bg-indigo-50 rounded-lg p-4 border border-indigo-200">
+            <div className="flex items-center space-x-3">
+              <div className="bg-indigo-100 p-2 rounded-lg">
+                <TrendingUp className="w-6 h-6 text-indigo-600" />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-indigo-600">Taxa de Ocupação</p>
+                <p className="text-2xl font-bold text-indigo-900">{stats.occupancyRate}%</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Filters */}
       <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
         <div className="flex flex-col lg:flex-row gap-4">
@@ -121,6 +281,7 @@ export const EventsList: React.FC = () => {
               value={filterStatus}
               onChange={(e) => setFilterStatus(e.target.value)}
               className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              aria-label="Filtrar por status"
             >
               <option value="all">Todos os Status</option>
               <option value="published">Publicados</option>
@@ -131,6 +292,7 @@ export const EventsList: React.FC = () => {
               value={filterCategory}
               onChange={(e) => setFilterCategory(e.target.value)}
               className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              aria-label="Filtrar por categoria"
             >
               <option value="all">Todas as Categorias</option>
               <option value="education">Educação</option>
@@ -185,7 +347,7 @@ export const EventsList: React.FC = () => {
                 <div className="space-y-2 mb-4">
                   <div className="flex items-center space-x-2 text-sm text-gray-600">
                     <Calendar className="w-4 h-4 text-gray-400" />
-                    <span>{formatDate(event.date)}</span>
+                    <span>{formatDate(event.event_date)}</span>
                   </div>
                   <div className="flex items-center space-x-2 text-sm text-gray-600">
                     <Clock className="w-4 h-4 text-gray-400" />
@@ -197,13 +359,29 @@ export const EventsList: React.FC = () => {
                   </div>
                   <div className="flex items-center space-x-2 text-sm text-gray-600">
                     <Users className="w-4 h-4 text-gray-400" />
-                    <span>{event.current_volunteers}/{event.max_volunteers} voluntários</span>
+                    <span>
+                      {(() => {
+                        // Contar voluntários das inscrições diretas (confirmadas)
+                        const directRegistrations = event.event_registrations?.filter((reg: EventRegistration) => reg.status === 'confirmed').length || 0
+
+                        // Contar voluntários das equipes já formadas
+                        const teamVolunteers = event.teams?.reduce((sum, team) => sum + team.current_volunteers, 0) || 0
+
+                        // Total de voluntários = inscrições diretas + voluntários em equipes
+                        const totalCurrentVolunteers = directRegistrations + teamVolunteers
+
+                        // Usar max_volunteers do evento como limite máximo
+                        const totalMaxVolunteers = event.max_volunteers || 0
+
+                        return `${totalCurrentVolunteers}/${totalMaxVolunteers} voluntários`
+                      })()}
+                    </span>
                   </div>
                 </div>
 
                 <div className="flex items-center justify-between pt-4 border-t border-gray-200">
                   <div className="text-sm text-gray-500">
-                    Por {event.organizer?.full_name}
+                    Por {event.admin?.full_name}
                   </div>
                   <Link
                     to={`/events/${event.id}`}
