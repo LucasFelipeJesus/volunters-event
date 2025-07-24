@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { supabase } from '../../lib/supabase'
@@ -34,6 +34,9 @@ interface EventFormData {
 }
 
 export const CreateEvent: React.FC = () => {
+    // useForm deve ser declarado antes de qualquer uso de watch
+    // ...já declarado acima, remover duplicidade...
+
     const { user } = useAuth()
     const navigate = useNavigate()
     const [isLoading, setIsLoading] = useState(false)
@@ -42,6 +45,14 @@ export const CreateEvent: React.FC = () => {
     const [imagePreview, setImagePreview] = useState<string | null>(null)
     const [uploadingImage, setUploadingImage] = useState(false)
 
+    // Estado para os termos
+    const [termsContent, setTermsContent] = useState('')
+
+    // Função utilitária para gerar o texto do termo
+    function gerarTextoTermoEvento(nomeEvento: string, cidade: string, dataEvento: string) {
+        return `FAQ ${cidade} - Perguntas e Respostas Iniciais\n\nOlá! obrigado por seu interesse em participar do time de churrasqueiros no show "${nomeEvento}" em ${cidade} que acontecerá no dia ${dataEvento}.\n\nLeia com atenção esse FAQ e ao final responda se concorda com todas as premissas do evento.\n\nAqui estão algumas informações preliminares:\n\n1. Existe algum tipo de ajuda de custo?\nInfelizmente não há ajuda de custo para esse tipo de evento.\n\n1.1 O que o voluntario ganha em ir?\nUm ingresso cortesia que poderá ser concedido à um acompanhante ou vendido com intenção de ajudar nos custos de locomoção, estadia, etc (venda sob total responsabilidade do voluntário). Em caso de não comparecimento, o ingresso é automaticamente cancelado.\nAlém de um boné oficial e exclusivo do TEAM ON FIRE, terá a oportunidade de aprender ou colocar em prática os aprendizados adquiridos até então. Poderá divulgar seu nome ou marca com boné e avental próprio (fotos liberadas). Fará um incrível network entre os envolvidos, experiência, amizades e ao final uma divertida confraternização com cervejas e risadas.\n\n2. Qual a jornada de trabalho?\nNormalmente de 8 a 12 horas, dependendo da estação que ficar alocado.\n\n3. É possível desconto na compra de ingressos?\nNão temos descontos ou qualquer outro tipo de bonificação em relação à ingressos.\n\n4. O que terei que fazer?\nTodos os voluntários passarão por todas as etapas dentro da estação de trabalho, ou seja, retirar proteínas no caminhão frigorífico, assar em parrilla, porcionar peças, organizar e limpar local de trabalho, atender ao público, etc. \n\n5. O que preciso levar?\nÉ necessário que cada voluntário leve seus utensílios essenciais como faca e pegador, podendo levar também outros itens que julgue necessário como por exemplo luva térmica, chaira, etc. Lembrando que todos esses itens são de responsabilidade pessoal. Cuide para não perde los!\n\n6. Posso me alimentar durante o trabalho?\nSim. A comida fica a disposição para todos os voluntários durante o trabalho.\n\n7. Posso beber bebida alcoólica?\nNão! Trabalhamos em regime de lei seca. Ao término do evento temos nossa confraternização onde todos poderão ingerir bebida alcoólica e se divertir!\n\n8. Posso sair da minha estação para assistir ao show?\nNão. Precisamos manter as atividades em andamento até o final do show. Dependendo do movimento, seu supervisor avisará sobre essa possibilidade.\n\n9. Local do evento\nSerá divulgado no grupo de voluntários no Whatsapp.\n\n10. Caso pretenda ir de carro ao evento, preencha os dados do veiculo no fim desse questionário.\n\nLembramos que cada voluntário é responsável pela sua condição física e não nos responsabilizamos por acidentes com facas, fogo, etc.\n\nMais informações no grupo dos voluntários confirmados.\n\nObrigado pelo seu interesse em estar conosco!`;
+    }
+
     const {
         register,
         handleSubmit,
@@ -49,8 +60,8 @@ export const CreateEvent: React.FC = () => {
         formState: { errors }
     } = useForm<EventFormData>({
         defaultValues: {
-            category: 'social',
-            max_volunteers: 10,
+            category: 'agenda-FS', // Categoria padrão
+            max_volunteers: 10, // Máximo de voluntários padrão
             title: '',
             description: '',
             location: '',
@@ -63,6 +74,24 @@ export const CreateEvent: React.FC = () => {
             image_url: ''
         }
     })
+
+    // As variáveis que usam watch devem ser declaradas após o hook useForm
+    const title = watch('title');
+    const location = watch('location');
+    const eventDateValue = watch('event_date');
+
+    // Sugere o texto do termo automaticamente ao preencher título, local e data
+    useEffect(() => {
+        if (title && location && eventDateValue) {
+            setTermsContent(
+                gerarTextoTermoEvento(
+                    title,
+                    location,
+                    new Date(eventDateValue).toLocaleDateString('pt-BR')
+                )
+            );
+        }
+    }, [title, location, eventDateValue, setTermsContent]);
 
     const eventDate = watch('event_date')
     const registrationEndDate = watch('registration_end_date')
@@ -153,7 +182,7 @@ export const CreateEvent: React.FC = () => {
             return publicUrl
         } catch (error) {
             console.error('Erro ao fazer upload da imagem:', error)
-            
+
             // Erro mais específico baseado no tipo de erro
             if (error && typeof error === 'object' && 'message' in error) {
                 const errorMessage = (error as { message: string }).message || ''
@@ -163,7 +192,7 @@ export const CreateEvent: React.FC = () => {
                     throw new Error('Não autorizado. Faça login novamente.')
                 }
             }
-            
+
             throw new Error('Erro ao fazer upload da imagem. Tente novamente.')
         } finally {
             setUploadingImage(false)
@@ -283,6 +312,32 @@ export const CreateEvent: React.FC = () => {
 
             if (insertError) throw insertError
 
+            // Após criar o evento, salvar os termos
+            if (termsContent && eventData?.id) {
+                await supabase.from('event_terms').insert([
+                    {
+                        event_id: eventData.id,
+                        terms_content: termsContent,
+                        is_required: true,
+                        is_active: true,
+                        created_by: user.id
+                    }
+                ])
+            }
+
+            // NOVO: Registrar o criador como participante do evento
+            if (eventData?.id && user?.id) {
+                await supabase.from('event_registrations').insert([
+                    {
+                        event_id: eventData.id,
+                        user_id: user.id,
+                        registration_type: 'direct',
+                        status: 'registered',
+                        created_at: new Date().toISOString()
+                    }
+                ])
+            }
+
             // Redirecionar para a página do evento
             navigate(`/events/${eventData.id}`)
         } catch (error: unknown) {
@@ -295,14 +350,8 @@ export const CreateEvent: React.FC = () => {
     }
 
     const categories = [
-        { value: 'education', label: 'Educação' },
-        { value: 'health', label: 'Saúde' },
-        { value: 'environment', label: 'Meio Ambiente' },
-        { value: 'social', label: 'Social' },
-        { value: 'culture', label: 'Cultura' },
-        { value: 'sports', label: 'Esportes' },
-        { value: 'technology', label: 'Tecnologia' },
-        { value: 'community', label: 'Comunidade' }
+        { value: 'agenda-FS', label: 'Agenda FS' },
+        { value: 'corporativo', label: 'Corporativo' }        
     ]
 
     // Calcular data mínima para inscrições (mais flexível)
@@ -352,6 +401,27 @@ export const CreateEvent: React.FC = () => {
 
             {/* Form */}
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-8">
+                {/* Termos do Evento (FAQ) */}
+                <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                    <div className="flex items-center space-x-3 mb-6">
+                        <FileText className="w-6 h-6 text-blue-600" />
+                        <h2 className="text-xl font-semibold text-gray-900">Termos do Evento (FAQ para voluntários)</h2>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Termos do Evento (FAQ)
+                        </label>
+                        <textarea
+                            value={termsContent}
+                            onChange={e => setTermsContent(e.target.value)}
+                            rows={16}
+                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            placeholder="Termos do evento para voluntários"
+                            required
+                        />
+                        <p className="text-xs text-gray-500 mt-2">O texto é sugerido automaticamente, mas pode ser editado pelo administrador antes de salvar.</p>
+                    </div>
+                </div>
                 {/* Informações Básicas */}
                 <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
                     <div className="flex items-center space-x-3 mb-6">

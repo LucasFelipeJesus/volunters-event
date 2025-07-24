@@ -282,15 +282,6 @@ interface EventWithVolunteers extends Event {
             Bem-vindo ao seu dashboard de voluntariado
           </p>
         </div>
-        {user?.role === 'captain' || user?.role === 'admin' ? (
-          <Link
-            to="/events/create"
-            className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-          >
-            <Plus className="w-5 h-5" />
-            <span>Criar Evento</span>
-          </Link>
-        ) : null}
       </div>
 
       {/* Stats Cards */}

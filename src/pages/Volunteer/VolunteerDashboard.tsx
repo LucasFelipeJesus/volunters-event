@@ -19,6 +19,17 @@ import {
 } from 'lucide-react'
 
 // Tipos específicos para o dashboard do voluntário
+interface TeamMemberRaw {
+    id: string
+    role_in_team: 'captain' | 'volunteer'
+    status: 'active' | 'inactive' | 'removed'
+    user?: {
+        id: string
+        full_name: string
+        email: string
+    }
+}
+
 interface VolunteerEvent {
     id: string
     title: string
@@ -46,6 +57,7 @@ interface MyParticipation {
     team: {
         id: string
         name: string
+        description?: string
         max_volunteers: number
         current_volunteers: number
         event: {
@@ -63,7 +75,15 @@ interface MyParticipation {
             full_name: string
             email: string
         }
+        members?: Array<{
+            id: string
+            full_name: string
+            email: string
+            role_in_team: 'captain' | 'volunteer'
+            status: 'active' | 'inactive' | 'removed'
+        }>
     }
+    registration_id?: string
 }
 
 interface MyEvaluation {
@@ -264,6 +284,7 @@ export const VolunteerDashboard: React.FC = () => {
           team:teams(
             id,
             name,
+            description,
             max_volunteers,
             current_volunteers,
             event:events(
@@ -280,6 +301,16 @@ export const VolunteerDashboard: React.FC = () => {
               id,
               full_name,
               email
+            ),
+            members:team_members(
+              id,
+              role_in_team,
+              status,
+              user:users(
+                id,
+                full_name,
+                email
+              )
             )
           )
         `)
@@ -294,7 +325,7 @@ export const VolunteerDashboard: React.FC = () => {
                     event_id,
                     user_id,
                     status,
-                    updated_at,
+                    registered_at,
                     events!inner(
                         id,
                         title,
@@ -308,29 +339,54 @@ export const VolunteerDashboard: React.FC = () => {
                 `)
                 .eq('user_id', user.id)
                 .in('status', ['pending', 'confirmed'])
-                .order('updated_at', { ascending: false })
+                .order('registered_at', { ascending: false })
 
             if (regError) {
                 console.error('Erro ao buscar inscrições:', regError)
             }
 
-            // Processar participações para adicionar flag de pode sair
-            const processedParticipations: MyParticipation[] = (participationsData || []).map(participation => ({
-                ...participation,
-                can_leave: participation.status === 'active' &&
-                    new Date(participation.team?.event?.event_date || '') > new Date()
-            }))
+            // Processar participações para adicionar flag de pode sair e formatar membros
+            const processedParticipations: MyParticipation[] = (participationsData || []).map(participation => {
+                // Processar membros da equipe
+                const members = participation.team?.members?.map((member: TeamMemberRaw) => ({
+                    id: member.user?.id || member.id,
+                    full_name: member.user?.full_name || '',
+                    email: member.user?.email || '',
+                    role_in_team: member.role_in_team,
+                    status: member.status
+                })) || []
+
+                return {
+                    ...participation,
+                    can_leave: participation.status === 'active' &&
+                        new Date(participation.team?.event?.event_date || '') > new Date(),
+                    team: {
+                        ...participation.team,
+                        members
+                    }
+                }
+            })
 
             // Processar inscrições diretas para o formato de participações
             const processedRegistrations: MyParticipation[] = (registrationsData || []).map(registration => {
-                const event = registration.events?.[0] // Pegar o primeiro evento da array
+                // O Supabase com inner join pode retornar como array, então pegamos o primeiro elemento
+                const event = Array.isArray(registration.events) ? registration.events[0] : registration.events
+
+                console.log('DEBUG - Processando inscrição direta:', {
+                    registrationId: registration.id,
+                    status: registration.status,
+                    event: event,
+                    eventDate: event?.event_date,
+                    eventsRaw: registration.events
+                })
+
                 return {
                     id: `reg_${registration.id}`,
                     user_id: registration.user_id,
                     team_id: `direct_${event?.id}`,
                     status: registration.status === 'confirmed' ? 'active' : 'inactive',
-                    role_in_team: 'volunteer',
-                    joined_at: registration.updated_at,
+                    role_in_team: 'volunteer' as const,
+                    joined_at: registration.registered_at || '',
                     can_leave: ['pending', 'confirmed'].includes(registration.status) &&
                         new Date(event?.event_date || '') > new Date(),
                     team: {
@@ -377,9 +433,66 @@ export const VolunteerDashboard: React.FC = () => {
 
             setMyEvaluations(evaluationsData || [])
 
-            // 4. Calcular estatísticas
-            const activeParticipations = allParticipations.filter(p => p.status === 'active').length
-            const completedEvents = allParticipations.filter(p =>
+
+            // 4. Calcular estatísticas considerando eventos únicos
+            const currentDate = new Date()
+            currentDate.setHours(0, 0, 0, 0)
+
+            // Mapear participações para eventos únicos (por event_id)
+            const uniqueEventMap = new Map<string, MyParticipation>()
+            allParticipations.forEach(p => {
+                const eventId = p.team?.event?.id
+                if (eventId && (!uniqueEventMap.has(eventId) || (uniqueEventMap.get(eventId)?.status !== 'active' && p.status === 'active'))) {
+                    // Prioriza status 'active' se houver duplicidade
+                    uniqueEventMap.set(eventId, p)
+                }
+            })
+
+            // Participações ativas: eventos únicos onde status é 'active' e evento não ocorreu
+            const activeParticipations = Array.from(uniqueEventMap.values()).filter(p => {
+                let motivo = '';
+                let isConfirmed = false;
+                if (p.id?.startsWith('reg_')) {
+                    isConfirmed = p.status === 'active' && p.registration_id !== undefined;
+                } else {
+                    isConfirmed = p.status === 'active';
+                }
+                if (!isConfirmed) {
+                    motivo = 'Status não é active';
+                    console.log('[DEBUG PARTICIPAÇÃO DESCARTADA]', { participacao: p, motivo });
+                    return false;
+                }
+                const event = p.team?.event;
+                if (!event) {
+                    motivo = 'Sem evento vinculado';
+                    console.log('[DEBUG PARTICIPAÇÃO DESCARTADA]', { participacao: p, motivo });
+                    return false;
+                }
+                if (event.status !== 'published') {
+                    motivo = `Status do evento não é published (${event.status})`;
+                    console.log('[DEBUG PARTICIPAÇÃO DESCARTADA]', { participacao: p, motivo });
+                    return false;
+                }
+                const eventDate = event.event_date;
+                if (!eventDate) {
+                    motivo = 'Evento sem data';
+                    console.log('[DEBUG PARTICIPAÇÃO DESCARTADA]', { participacao: p, motivo });
+                    return false;
+                }
+                const eventDateTime = new Date(eventDate);
+                eventDateTime.setHours(0, 0, 0, 0);
+                if (!(eventDateTime >= currentDate)) {
+                    motivo = `Data do evento já passou (${eventDate})`;
+                    console.log('[DEBUG PARTICIPAÇÃO DESCARTADA]', { participacao: p, motivo });
+                    return false;
+                }
+                // Se chegou aqui, é ativa
+                console.log('[DEBUG PARTICIPAÇÃO ATIVA]', { participacao: p });
+                return true;
+            }).length;
+
+            // Eventos concluídos: eventos únicos já ocorridos ou status completed
+            const completedEvents = Array.from(uniqueEventMap.values()).filter(p =>
                 p.team?.event?.status === 'completed' ||
                 new Date(p.team?.event?.event_date || '') < new Date()
             ).length
@@ -390,7 +503,7 @@ export const VolunteerDashboard: React.FC = () => {
 
             // Categoria mais participada
             const categoryCount = new Map()
-            allParticipations.forEach(p => {
+            Array.from(uniqueEventMap.values()).forEach(p => {
                 const category = p.team?.event?.category || 'other'
                 categoryCount.set(category, (categoryCount.get(category) || 0) + 1)
             })
@@ -400,7 +513,7 @@ export const VolunteerDashboard: React.FC = () => {
                 : ''
 
             setStats({
-                totalParticipations: allParticipations.length,
+                totalParticipations: uniqueEventMap.size,
                 activeParticipations,
                 completedEvents,
                 averageRating: Math.round(avgRating * 10) / 10,
@@ -442,8 +555,7 @@ export const VolunteerDashboard: React.FC = () => {
                 const { error } = await supabase
                     .from('event_registrations')
                     .update({
-                        status: 'cancelled',
-                        updated_at: new Date().toISOString()
+                        status: 'cancelled'
                     })
                     .eq('id', participation.registration_id)
 
@@ -614,8 +726,7 @@ export const VolunteerDashboard: React.FC = () => {
                     .update({
                         status: 'confirmed',
                         terms_accepted: true, // Marcar que os termos foram aceitos
-                        terms_accepted_at: new Date().toISOString(),
-                        updated_at: new Date().toISOString()
+                        terms_accepted_at: new Date().toISOString()
                     })
                     .eq('id', existingRegistration.id)
 
@@ -820,8 +931,7 @@ export const VolunteerDashboard: React.FC = () => {
                 .update({
                     status: 'cancelled',
                     terms_accepted: false, // Zerar aceitação para forçar releitura
-                    terms_accepted_at: null, // Limpar timestamp
-                    updated_at: new Date().toISOString()
+                    terms_accepted_at: null // Limpar timestamp
                 })
                 .eq('event_id', eventId)
                 .eq('user_id', user?.id)
@@ -873,12 +983,20 @@ export const VolunteerDashboard: React.FC = () => {
         }
     }
 
-    const getStatusText = (status: string) => {
+    // Novo: status customizado para inscrição direta sem equipe
+    const getStatusText = (status: string, participation?: MyParticipation) => {
+        // Se for inscrição direta (sem equipe real) e evento ainda não ocorreu
+        if (participation && participation.team?.name === 'Inscrição Direta') {
+            const eventDate = participation.team?.event?.event_date;
+            if (eventDate && new Date(eventDate) >= new Date()) {
+                return 'Aguardando alocar equipe';
+            }
+        }
         switch (status) {
-            case 'active': return 'Ativo'
-            case 'inactive': return 'Inativo'
-            case 'removed': return 'Removido'
-            default: return status
+            case 'active': return 'Ativo';
+            case 'inactive': return 'Inativo';
+            case 'removed': return 'Removido';
+            default: return status;
         }
     }
 
@@ -903,11 +1021,20 @@ export const VolunteerDashboard: React.FC = () => {
         return matchesSearch
     })
 
-    const filteredParticipations = myParticipations.filter(participation => {
+    // Gerar participações únicas por evento (igual ao stats)
+    const uniqueEventMap = new Map<string, MyParticipation>()
+    myParticipations.forEach(p => {
+        const eventId = p.team?.event?.id
+        if (eventId && (!uniqueEventMap.has(eventId) || (uniqueEventMap.get(eventId)?.status !== 'active' && p.status === 'active'))) {
+            uniqueEventMap.set(eventId, p)
+        }
+    })
+    const participationsByEvent = Array.from(uniqueEventMap.values())
+
+    const filteredParticipations = participationsByEvent.filter(participation => {
         const matchesSearch = participation.team?.event?.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
             participation.team?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
             participation.team?.event?.location?.toLowerCase().includes(searchTerm.toLowerCase())
-
         return matchesSearch
     })
 
@@ -1164,21 +1291,75 @@ export const VolunteerDashboard: React.FC = () => {
                                                             {participation.team?.event?.title}
                                                         </h3>
                                                         <span className={`px-2 py-1 rounded-full text-xs font-medium border ${getStatusColor(participation.status)}`}>
-                                                            {getStatusText(participation.status)}
+                                                            {getStatusText(participation.status, participation)}
                                                         </span>
                                                     </div>
 
                                                     {/* Mostrar informações diferentes para equipes reais vs inscrições diretas */}
                                                     {participation.team?.name === 'Inscrição Direta' ? (
-                                                        <p className="text-sm text-gray-600 mb-3">
-                                                            <strong>Status:</strong> Aguardando formação de equipe
-                                                        </p>
+                                                        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-3">
+                                                            <div className="flex items-center space-x-2 mb-2">
+                                                                <AlertTriangle className="w-4 h-4 text-yellow-600" />
+                                                                <span className="text-sm font-medium text-yellow-800">Aguardando Alocação</span>
+                                                            </div>
+                                                            <p className="text-sm text-yellow-700">
+                                                                Você está inscrito no evento e aguardando ser alocado em uma equipe pelo organizador.
+                                                            </p>
+                                                        </div>
                                                     ) : (
-                                                        <p className="text-sm text-gray-600 mb-3">
-                                                            <strong>Equipe:</strong> {participation.team?.name} •
-                                                            <strong> Capitão:</strong> {participation.team?.captain?.full_name} •
-                                                            <strong> Função:</strong> {participation.role_in_team === 'captain' ? 'Capitão' : 'Voluntário'}
-                                                        </p>
+                                                            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-3">
+                                                                <div className="flex items-center justify-between mb-2">
+                                                                    <div className="flex items-center space-x-2">
+                                                                        <Users className="w-4 h-4 text-blue-600" />
+                                                                        <span className="text-sm font-medium text-blue-800">
+                                                                            {participation.team?.name}
+                                                                        </span>
+                                                                    </div>
+                                                                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${participation.role_in_team === 'captain'
+                                                                        ? 'bg-purple-100 text-purple-800'
+                                                                        : 'bg-green-100 text-green-800'
+                                                                        }`}>
+                                                                        {participation.role_in_team === 'captain' ? 'Capitão' : 'Voluntário'}
+                                                                    </span>
+                                                                </div>
+
+                                                                {participation.team?.description && (
+                                                                    <p className="text-sm text-blue-700 mb-2">
+                                                                        <strong>Descrição:</strong> {participation.team.description}
+                                                                    </p>
+                                                                )}
+
+                                                                <div className="flex items-center space-x-4 text-sm text-blue-700">
+                                                                    <span>
+                                                                        <strong>Capitão:</strong> {participation.team?.captain?.full_name}
+                                                                    </span>
+                                                                    <span>
+                                                                        <strong>Membros:</strong> {participation.team?.current_volunteers}/{participation.team?.max_volunteers}
+                                                                    </span>
+                                                                </div>
+
+                                                                {participation.team?.members && participation.team.members.length > 0 && (
+                                                                    <div className="mt-2">
+                                                                        <p className="text-xs font-medium text-blue-800 mb-1">Membros da Equipe:</p>
+                                                                        <div className="flex flex-wrap gap-1">
+                                                                            {participation.team.members
+                                                                                .filter(member => member.status === 'active')
+                                                                                .map((member) => (
+                                                                                    <span
+                                                                                        key={member.id}
+                                                                                        className={`px-2 py-1 rounded text-xs ${member.role_in_team === 'captain'
+                                                                                            ? 'bg-purple-100 text-purple-700 border border-purple-200'
+                                                                                            : 'bg-gray-100 text-gray-700 border border-gray-200'
+                                                                                            }`}
+                                                                                    >
+                                                                                        {member.full_name}
+                                                                                        {member.role_in_team === 'captain' && ' (Capitão)'}
+                                                                                    </span>
+                                                                                ))}
+                                                                        </div>
+                                                                    </div>
+                                                                )}
+                                                            </div>
                                                     )}
 
                                                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-gray-600">
