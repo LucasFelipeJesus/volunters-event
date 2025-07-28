@@ -451,7 +451,7 @@ export const Profile: React.FC = () => {
                 )}
             </div>
 
-    // Alerts
+            {/* Mensagens de erro e sucesso */}
             {error && (
                 <div className="bg-red-50 border border-red-200 rounded-lg p-4">
                     <div className="flex items-center space-x-2">

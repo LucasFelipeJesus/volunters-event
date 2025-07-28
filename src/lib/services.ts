@@ -23,7 +23,7 @@ export const userService = {
 
             // Adicionar timeout menor para detectar problemas RLS mais rapidamente
             const timeoutPromise = new Promise((_, reject) => {
-                setTimeout(() => reject(new Error('TIMEOUT_RLS_DETECTED')), 5000) // 5 segundos
+                setTimeout(() => reject(new Error('TIMEOUT_RLS_DETECTED')), 10000) // 10 segundos
             })
 
             const queryPromise = supabase
