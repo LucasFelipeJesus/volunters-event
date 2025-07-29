@@ -269,6 +269,9 @@ interface EventWithVolunteers extends Event {
   if (user?.role === 'volunteer') {
     return <Navigate to="/volunteer" replace />
   }
+  if (user?.role === 'captain') {
+    return <Navigate to="/captain" replace />
+  }
 
   return (
     <div className="space-y-8">

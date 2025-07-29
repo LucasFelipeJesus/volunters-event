@@ -18,6 +18,8 @@ import { EditTeam } from './pages/Teams/EditTeam'
 import { TeamsManagement } from './pages/Teams/TeamsManagement'
 import { Profile } from './pages/Profile/Profile'
 import { VolunteerDashboard } from './pages/Volunteer/VolunteerDashboard'
+import { CaptainDashboard } from './pages/Captain/CaptainDashboard'
+import AvaliarEquipe from './pages/Captain/AvaliarEquipe'
 
 // Admin Pages
 import { AdminUsersManagement } from './pages/Admin/UsersManagement'
@@ -43,6 +45,8 @@ function App() {
           }>
             <Route index element={<Dashboard />} />
             <Route path="volunteer" element={<VolunteerDashboard />} />
+            <Route path="captain" element={<CaptainDashboard />} />
+            <Route path="captain/avaliar-equipe" element={<AvaliarEquipe />} />
             <Route path="events" element={<EventsList />} />
             <Route path="events/create" element={<CreateEvent />} />
             <Route path="events/:id" element={<EventDetails />} />

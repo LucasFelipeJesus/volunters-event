@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../hooks/useAuth'
 import { supabase } from '../../lib/supabase'
+import { setUserRole } from '../../lib/services'
 import {
     Users,
     X,
@@ -232,7 +233,14 @@ export const CreateTeam: React.FC = () => {
                 throw teamError
             }
 
-            // 2. Adicionar o capitão como membro da equipe
+            // 2. Promover o usuário a capitão se necessário
+            const selectedCaptain = captains.find(c => c.id === formData.captain_id)
+            if (selectedCaptain && selectedCaptain.role !== 'captain') {
+                const error = await setUserRole(selectedCaptain.id, 'captain')
+                if (error) throw error
+            }
+
+            // 3. Adicionar o capitão como membro da equipe
             const { error: captainError } = await supabase
                 .from('team_members')
                 .insert({

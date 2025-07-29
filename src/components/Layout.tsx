@@ -34,7 +34,8 @@ export const Layout: React.FC = () => {
   const navigation = [
     { name: 'Dashboard', href: '/', icon: Home },
     ...(user?.role === 'volunteer' ? [{ name: 'Meu Painel', href: '/volunteer', icon: User }] : []),
-    ...(user?.role === 'admin' || user?.role === 'captain' ? [{ name: 'Eventos', href: '/events', icon: Calendar }] : []),
+    ...(user?.role === 'captain' ? [{ name: 'Avaliar Equipe', href: '/captain/avaliar-equipe', icon: Users }] : []),
+    ...(user?.role === 'admin' ? [{ name: 'Eventos', href: '/events', icon: Calendar }] : []),
     ...(user?.role === 'admin' ? [{ name: 'Equipes', href: '/teams', icon: Users }] : []),
     ...(user?.role === 'admin' ? [{ name: 'Gerenciar Usuários', href: '/admin/users', icon: UserCog }] : []),
     { name: 'Perfil', href: '/profile', icon: User },

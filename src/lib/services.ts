@@ -1,5 +1,6 @@
-import { supabase } from './supabase'
-import { logSupabaseError, SuccessMessages } from './errorHandling'
+
+import { supabase } from './supabase';
+import { logSupabaseError, SuccessMessages } from './errorHandling';
 import type {
     User,
     Event,
@@ -12,7 +13,22 @@ import type {
     EvaluationDetails,
     AdminEvaluationDetails,
     UserStats
-} from './supabase'
+} from './supabase';
+
+/**
+ * Altera o papel do usuário entre 'volunteer' e 'captain'.
+ * @param userId ID do usuário
+ * @param role 'volunteer' ou 'captain'
+ */
+export async function setUserRole(userId: string, role: 'volunteer' | 'captain') {
+    const { error } = await supabase
+        .from('users')
+        .update({ role })
+        .eq('id', userId);
+    return error;
+}
+
+
 
 // Services para usuários
 export const userService = {

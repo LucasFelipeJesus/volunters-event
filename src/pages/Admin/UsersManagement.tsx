@@ -1,6 +1,14 @@
+// ...imports e interfaces...
+
+// Removido bloco duplicado e incorreto de exportação do componente AdminUsersManagement
+// ...imports e interfaces...
+
+// ...código já existente...
+// ...imports e interfaces...
 import React, { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '../../hooks/useAuth'
 import { supabase } from '../../lib/supabase'
+import { setUserRole } from '../../lib/services'
 import {
     User,
     Star,
@@ -193,17 +201,25 @@ export const AdminUsersManagement: React.FC = () => {
 
     const promoteToCapitain = async (userId: string) => {
         try {
-            const { error } = await supabase.rpc('promote_to_captain', {
-                user_id_param: userId
-            })
-
+            const error = await setUserRole(userId, 'captain')
             if (error) throw error
-
             alert('Usuário promovido a capitão com sucesso!')
             fetchUsers()
         } catch (error) {
             console.error('Erro ao promover usuário:', error)
             alert('Erro ao promover usuário')
+        }
+    }
+
+    const demoteToVolunteer = async (userId: string) => {
+        try {
+            const error = await setUserRole(userId, 'volunteer')
+            if (error) throw error
+            alert('Usuário revertido para voluntário com sucesso!')
+            fetchUsers()
+        } catch (error) {
+            console.error('Erro ao reverter usuário:', error)
+            alert('Erro ao reverter usuário')
         }
     }
 
@@ -512,6 +528,7 @@ export const AdminUsersManagement: React.FC = () => {
                                                                         <span>Ver Detalhes</span>
                                                                     </button>
 
+
                                                                     {userData.role === 'volunteer' && (
                                                                         <button
                                                                             onClick={() => {
@@ -522,6 +539,18 @@ export const AdminUsersManagement: React.FC = () => {
                                                                         >
                                                                             <Award className="w-4 h-4" />
                                                                             <span>Promover a Capitão</span>
+                                                                        </button>
+                                                                    )}
+                                                                    {userData.role === 'captain' && (
+                                                                        <button
+                                                                            onClick={() => {
+                                                                                demoteToVolunteer(userData.id)
+                                                                                setActionMenuOpen(null)
+                                                                            }}
+                                                                            className="w-full text-left px-4 py-2 text-sm text-blue-700 hover:bg-blue-50 flex items-center space-x-2"
+                                                                        >
+                                                                            <User className="w-4 h-4" />
+                                                                            <span>Reverter para Voluntário</span>
                                                                         </button>
                                                                     )}
 
