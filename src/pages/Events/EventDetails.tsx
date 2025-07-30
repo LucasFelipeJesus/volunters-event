@@ -513,11 +513,21 @@ export const EventDetails: React.FC = () => {
         )
     }
 
-    const totalVolunteers = (event.teams?.reduce((sum, team) =>
-        sum + (team.members?.filter(member => member.status === 'active').length || 0), 0
-    ) || 0) + (event.event_registrations?.filter(reg =>
-        reg.status === 'confirmed' || reg.status === 'pending'
-    ).length || 0)
+    // ...existing code...
+    const teamVolunteerIds = new Set(
+        event.teams?.flatMap(team =>
+            team.members?.filter(member => member.status === 'active').map(member => member.user_id)
+        ) || []
+    )
+    const directVolunteerIds = new Set(
+        event.event_registrations
+            ?.filter(reg => reg.status === 'confirmed' || reg.status === 'pending')
+            .map(reg => reg.user_id)
+        || []
+    )
+    const allVolunteerIds = new Set([...teamVolunteerIds, ...directVolunteerIds])
+    const totalVolunteers = allVolunteerIds.size
+    // ...existing code...
 
     return (
         <div className="max-w-6xl mx-auto space-y-8">

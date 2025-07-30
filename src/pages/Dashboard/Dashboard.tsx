@@ -37,7 +37,9 @@ interface EventRegistration {
 interface EventWithVolunteers extends Event {
   totalVolunteers?: number
   maxVolunteers?: number
-}export const Dashboard: React.FC = () => {
+}
+
+export const Dashboard: React.FC = () => {
   const { user } = useAuth()
   const [stats, setStats] = useState({
     activeEvents: 0,
@@ -49,6 +51,11 @@ interface EventWithVolunteers extends Event {
   const [recentEvents, setRecentEvents] = useState<EventWithVolunteers[]>([])
   const [myParticipations, setMyParticipations] = useState<EventRegistration[]>([])
   const [loading, setLoading] = useState(true)
+  // Estado para estatísticas de equipes
+  const [teamStats, setTeamStats] = useState({
+    totalTeams: 0,
+    activeTeams: 0
+  })
 
   const fetchDashboardData = useCallback(async () => {
     try {
@@ -65,7 +72,7 @@ interface EventWithVolunteers extends Event {
           .gte('event_date', today)
 
         // 2. Buscar quantidade total de voluntários cadastrados (excluindo administradores)
-        const { data: volunteersData, error: volunteersError } = await supabase
+        const { data: volunteersData } = await supabase
           .from('users')
           .select('id, role, full_name')
           .eq('is_active', true)
@@ -75,12 +82,6 @@ interface EventWithVolunteers extends Event {
           user.role === 'volunteer' ||
           user.role === 'captain'
         )
-
-        console.log('🔍 Debug Voluntários Cadastrados (AMPLIADO):')
-        console.log('📊 Todos os usuários ativos:', volunteersData)
-        console.log('👥 Voluntários filtrados:', activeVolunteers)
-        console.log('❌ volunteersError:', volunteersError)
-        console.log('📈 Total encontrado:', activeVolunteers?.length || 0)
 
         // 3. Buscar eventos concluídos
         const { data: completedEventsData } = await supabase
@@ -96,6 +97,19 @@ interface EventWithVolunteers extends Event {
         const { data: topCaptainsData } = await supabase
           .from('admin_evaluations')
           .select('captain_id, overall_rating')
+
+        // 5. Buscar estatísticas de equipes
+        const { data: teamsData } = await supabase
+          .from('teams')
+          .select('id, status')
+
+        const totalTeams = teamsData?.length || 0
+        // Considera como ativa apenas se status === 'active' (conforme tipagem do banco)
+        const activeTeams = teamsData?.filter(team => team.status === 'complete').length || 0
+        setTeamStats({
+          totalTeams,
+          activeTeams
+        })
 
         // Calcular médias de avaliação
         const volunteerRatings = new Map()
@@ -425,17 +439,15 @@ interface EventWithVolunteers extends Event {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="text-center p-4 bg-blue-50 rounded-lg">
                     <div className="text-2xl font-bold text-blue-600">
-                      {/* TODO: Buscar número real de equipes */}
-                      -
+                      {teamStats.totalTeams}
                     </div>
-                    <div className="text-sm text-blue-700">Total de Equipes</div>
+                    <div className="text-sm text-blue-700">Total de Equipes em Formação</div>
                   </div>
                   <div className="text-center p-4 bg-green-50 rounded-lg">
                     <div className="text-2xl font-bold text-green-600">
-                      {/* TODO: Buscar equipes ativas */}
-                      -
+                      {teamStats.activeTeams}
                     </div>
-                    <div className="text-sm text-green-700">Equipes Ativas</div>
+                    <div className="text-sm text-green-700">Equipes Completas</div>
                   </div>
                 </div>
                 <div className="text-center">

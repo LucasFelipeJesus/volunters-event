@@ -1,4 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react'
+
+interface UserProfile {
+  id: string;
+  full_name: string;
+  email: string;
+  role: string;
+}
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../hooks/useAuth'
@@ -22,46 +29,125 @@ interface TeamMember {
   joined_at: string
   left_at?: string
   user?: {
-    id: string
-    full_name: string
-    email: string
-    role: string
-  }
+    id: string;
+    full_name: string;
+    email: string;
+    role: string;
+  };
 }
 
 interface Team {
-  id: string
-  name: string
-  event_id: string
-  captain_id: string
-  max_volunteers: number
-  status: string
-  created_at: string
-  updated_at: string
-  members?: TeamMember[]
+  id: string;
+  name: string;
+  event_id: string;
+  captain_id: string;
+  max_volunteers: number;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  members?: TeamMember[];
   event?: {
-    id: string
-    title: string
-    admin_id: string
-  }
+    id: string;
+    title: string;
+    admin_id: string;
+  };
 }
 
 export const EditTeam: React.FC = () => {
-  const { id } = useParams<{ id: string }>()
-  const { user } = useAuth()
-  const navigate = useNavigate()
+  // Hooks de estado principais SEMPRE primeiro
+  const { id } = useParams<{ id: string }>();
+  const { user } = useAuth();
+  const navigate = useNavigate();
 
-  const [team, setTeam] = useState<Team | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState<string | null>(null)
+  const [team, setTeam] = useState<Team | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
 
   // Estados para edição
   const [editData, setEditData] = useState({
     name: '',
     max_volunteers: 0,
     status: 'forming'
-  })
+  });
+
+  // Estado para voluntários disponíveis
+  const [availableVolunteers, setAvailableVolunteers] = useState<UserProfile[]>([]);
+  const [selectedVolunteerId, setSelectedVolunteerId] = useState('');
+  // Buscar voluntários disponíveis para inclusão
+  useEffect(() => {
+    const fetchAvailableVolunteers = async () => {
+      if (!team?.event_id) return;
+      // Buscar todos voluntários ativos
+      const { data: allVolunteers } = await supabase
+        .from('users')
+        .select('id, full_name, email, role')
+        .eq('role', 'volunteer')
+        .eq('is_active', true);
+
+      // Buscar IDs das equipes deste evento
+      const { data: eventTeams } = await supabase
+        .from('teams')
+        .select('id')
+        .eq('event_id', team.event_id);
+      const eventTeamIds = eventTeams?.map((t: { id: string }) => t.id) || [];
+
+      // Buscar membros ativos de todas as equipes deste evento
+      let allocatedIds: string[] = [];
+      if (eventTeamIds.length > 0) {
+        const { data: eventMembers } = await supabase
+          .from('team_members')
+          .select('user_id, team_id, status')
+          .in('status', ['active'])
+          .in('team_id', eventTeamIds);
+        allocatedIds = eventMembers?.map((m: { user_id: string }) => m.user_id) || [];
+      }
+
+      // IDs de membros removidos/inativos desta equipe
+      const thisTeamInactiveIds = team?.members?.filter((m) => m.status !== 'active').map((m) => m.user_id) || [];
+
+      // Disponíveis: não alocados OU removidos/inativos desta equipe
+      const available = (allVolunteers || []).filter((v) =>
+        !allocatedIds.includes(v.id) || thisTeamInactiveIds.includes(v.id)
+      );
+      setAvailableVolunteers(available);
+    };
+    fetchAvailableVolunteers();
+  }, [team]);
+
+  // Adicionar voluntário selecionado
+  const handleAddVolunteer = async () => {
+    if (!selectedVolunteerId || !team) return;
+    setError(null);
+    try {
+      // Verifica se já existe registro para esse user_id nesta equipe
+      const existing = team.members?.find((m) => m.user_id === selectedVolunteerId);
+      if (existing) {
+        // Se já existe, apenas reativa
+        await supabase
+          .from('team_members')
+          .update({ status: 'active', left_at: null })
+          .eq('id', existing.id);
+      } else {
+        // Se não existe, cria novo
+        await supabase
+          .from('team_members')
+          .insert({
+            team_id: team.id,
+            user_id: selectedVolunteerId,
+            role_in_team: 'volunteer',
+            status: 'active',
+            joined_at: new Date().toISOString()
+          });
+      }
+      setSuccess('Voluntário adicionado à equipe!');
+      setSelectedVolunteerId('');
+      await fetchTeamDetails();
+    } catch {
+      setError('Erro ao adicionar voluntário.');
+    }
+  };
+  // ...restante do componente permanece igual...
 
   const fetchTeamDetails = useCallback(async () => {
     try {
@@ -217,8 +303,8 @@ export const EditTeam: React.FC = () => {
     switch (status) {
       case 'active': return 'bg-green-100 text-green-800'
       case 'forming': return 'bg-yellow-100 text-yellow-800'
-      case 'full': return 'bg-blue-100 text-blue-800'
-      case 'completed': return 'bg-gray-100 text-gray-800'
+      case 'complete': return 'bg-blue-100 text-blue-800'
+      case 'finished': return 'bg-gray-100 text-gray-800'
       default: return 'bg-gray-100 text-gray-800'
     }
   }
@@ -227,8 +313,8 @@ export const EditTeam: React.FC = () => {
     switch (status) {
       case 'active': return 'Ativa'
       case 'forming': return 'Formando'
-      case 'full': return 'Completa'
-      case 'completed': return 'Concluída'
+      case 'complete': return 'Completa'
+      case 'finished': return 'Concluída'
       default: return status
     }
   }
@@ -377,8 +463,8 @@ export const EditTeam: React.FC = () => {
                     >
                       <option value="forming">Formando</option>
                       <option value="active">Ativa</option>
-                      <option value="full">Completa</option>
-                      <option value="completed">Concluída</option>
+                      <option value="complete">Completa</option>
+                      <option value="finished">Concluída</option>
                     </select>
                   </div>
                 </div>
@@ -398,6 +484,31 @@ export const EditTeam: React.FC = () => {
               <Users className="w-5 h-5 mr-2" />
               Membros da Equipe ({activeMembers.length}/{team.max_volunteers})
             </h2>
+
+            {/* Adicionar voluntário disponível se houver vagas */}
+            {canEdit && activeMembers.length < team.max_volunteers && (
+              <div className="mb-6 flex flex-col md:flex-row md:items-center gap-2">
+                <select
+                  className="w-full md:w-72 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  value={selectedVolunteerId}
+                  onChange={e => setSelectedVolunteerId(e.target.value)}
+                  title="Adicionar voluntário à equipe"
+                  aria-label="Adicionar voluntário à equipe"
+                >
+                  <option value="">Adicionar voluntário...</option>
+                  {availableVolunteers.map((v) => (
+                    <option key={v.id} value={v.id}>{v.full_name} ({v.email})</option>
+                  ))}
+                </select>
+                <button
+                  className="ml-2 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                  onClick={handleAddVolunteer}
+                  disabled={!selectedVolunteerId}
+                >
+                  Incluir voluntário
+                </button>
+              </div>
+            )}
 
             {activeMembers.length > 0 ? (
               <div className="space-y-3">

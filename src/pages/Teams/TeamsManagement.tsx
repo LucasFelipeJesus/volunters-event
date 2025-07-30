@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../hooks/useAuth'
 import { supabase } from '../../lib/supabase'
 import {
@@ -10,7 +10,6 @@ import {
     User,
     Edit,
     Trash2,
-    Eye,
     Filter
 } from 'lucide-react'
 
@@ -46,6 +45,7 @@ interface Team {
 }
 
 export const TeamsManagement: React.FC = () => {
+    const navigate = useNavigate();
     const { user } = useAuth()
     const [teams, setTeams] = useState<Team[]>([])
     const [loading, setLoading] = useState(true)
@@ -125,6 +125,17 @@ export const TeamsManagement: React.FC = () => {
         if (user?.role === 'admin') {
             fetchTeams()
             fetchEvents()
+        }
+
+        // Atualiza equipes ao voltar para a aba/página
+        const handleVisibility = () => {
+            if (document.visibilityState === 'visible' && user?.role === 'admin') {
+                fetchTeams()
+            }
+        }
+        document.addEventListener('visibilitychange', handleVisibility)
+        return () => {
+            document.removeEventListener('visibilitychange', handleVisibility)
         }
     }, [user, fetchTeams, fetchEvents])
 
@@ -355,40 +366,37 @@ export const TeamsManagement: React.FC = () => {
                                             </div>
                                         </div>
 
-                                        {/* Membros da equipe */}
+                                        {/* Membros da equipe (apenas ativos) */}
                                         <div className="mt-3">
                                             <div className="flex flex-wrap gap-2">
-                                                {team.members?.slice(0, 5).map((member) => (
-                                                    <span
-                                                        key={member.id}
-                                                        className={`inline-flex items-center px-2 py-1 rounded-full text-xs ${member.role_in_team === 'captain'
+                                                {team.members
+                                                    ?.filter((member) => member.status === 'active' || member.status === 'confirmed')
+                                                    .slice(0, 5)
+                                                    .map((member) => (
+                                                        <span
+                                                            key={member.id}
+                                                            className={`inline-flex items-center px-2 py-1 rounded-full text-xs ${member.role_in_team === 'captain'
                                                                 ? 'bg-blue-100 text-blue-800'
                                                                 : 'bg-gray-100 text-gray-800'
                                                             }`}
-                                                    >
-                                                        {member.user.full_name}
-                                                        {member.role_in_team === 'captain' && ' (Cap.)'}
-                                                    </span>
-                                                ))}
-                                                {team.members && team.members.length > 5 && (
-                                                    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-600">
-                                                        +{team.members.length - 5} mais
-                                                    </span>
-                                                )}
+                                                        >
+                                                            {member.user.full_name}
+                                                            {member.role_in_team === 'captain' && ' (Cap.)'}
+                                                        </span>
+                                                    ))}
+                                                {team.members &&
+                                                    team.members.filter((member) => member.status === 'active' || member.status === 'confirmed').length > 5 && (
+                                                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-600">
+                                                            +{team.members.filter((member) => member.status === 'active' || member.status === 'confirmed').length - 5} mais
+                                                        </span>
+                                                    )}
                                             </div>
                                         </div>
                                     </div>
 
                                     <div className="flex items-center space-x-2 ml-4">
                                         <button
-                                            onClick={() => {/* TODO: Ver detalhes */ }}
-                                            className="p-2 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                                            title="Ver detalhes"
-                                        >
-                                            <Eye className="w-4 h-4" />
-                                        </button>
-                                        <button
-                                            onClick={() => {/* TODO: Editar equipe */ }}
+                                            onClick={() => navigate(`/teams/${team.id}/edit`)}
                                             className="p-2 text-gray-600 hover:text-yellow-600 hover:bg-yellow-50 rounded-lg transition-colors"
                                             title="Editar equipe"
                                         >

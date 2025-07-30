@@ -398,17 +398,142 @@ export const CaptainDashboard: React.FC = () => {
                         current_volunteers: 0,
                         event: event,
                         captain: {
-                            id: 'system',
-                            full_name: 'Sistema',
-                            email: 'sistema@voluntarios.com'
+                            id: user.id,
+                            full_name: user.full_name || 'Usuário',
+                            email: user.email || ''
                         }
                     },
                     registration_id: registration.id // Identificador para cancelar inscrição
                 }
             })
+            // Após processedParticipations e processedRegistrations, dentro do fetchVolunteerData
 
+            // Crie as interfaces intermediárias para mapear exatamente como o Supabase retorna
+
+            interface TeamMemberRawSupabase {
+                id: string;
+                role_in_team: 'captain' | 'volunteer';
+                status: 'active' | 'inactive' | 'removed';
+                user?: {
+                    id: string;
+                    full_name: string;
+                    email: string;
+                }[]; // user como array!
+            }
+
+            interface TeamEventSupabase {
+                id: string;
+                title: string;
+                description: string;
+                event_date: string;
+                start_time: string;
+                end_time: string;
+                location: string;
+                status: string;
+                category: string;
+                image_url?: string;
+            }
+
+            interface TeamCaptainSupabase {
+                id: string;
+                full_name: string;
+                email: string;
+            }
+
+            interface TeamRawSupabase {
+                id: string;
+                name: string;
+                description?: string;
+                max_volunteers: number;
+                current_volunteers: number;
+                event: TeamEventSupabase[];
+                captain: TeamCaptainSupabase[];
+                members?: TeamMemberRawSupabase[];
+            }
+
+            // ... dentro do seu fetchVolunteerData, após processedParticipations e processedRegistrations
+
+            const { data: teamsAsCaptain, error: teamsAsCaptainError } = await supabase
+                .from('teams')
+                .select(`
+        id,
+        name,
+        description,
+        max_volunteers,
+        current_volunteers,
+        event:events(
+            id,
+            title,
+            description,
+            event_date,
+            start_time,
+            end_time,
+            location,
+            status,
+            category,
+            image_url
+        ),
+        captain:users(
+            id,
+            full_name,
+            email
+        ),
+        members:team_members(
+            id,
+            role_in_team,
+            status,
+            user:users(
+                id,
+                full_name,
+                email
+            )
+        )
+    `)
+                .eq('captain_id', user.id);
+
+            if (teamsAsCaptainError) {
+                console.error('Erro ao buscar equipes onde sou capitão:', teamsAsCaptainError);
+            }
+
+            const teamsAsCaptainData = (teamsAsCaptain || []) as unknown as TeamRawSupabase[];
+
+            const teamsAsCaptainParticipations: MyParticipation[] = teamsAsCaptainData
+                // Só adiciona se o capitão não for membro formal (para evitar duplicidade)
+                .filter(team =>
+                    !(team.members || []).some(member =>
+                        (member.user?.[0]?.id || member.id) === user.id
+                    )
+                )
+                .map(team => ({
+                    id: `captain_${team.id}`,
+                    team_id: team.id,
+                    role_in_team: 'captain',
+                    status: 'active',
+                    joined_at: '',
+                    can_leave: false,
+                    team: {
+                        id: team.id,
+                        name: team.name,
+                        description: team.description,
+                        max_volunteers: team.max_volunteers,
+                        current_volunteers: team.current_volunteers,
+                        event: team.event[0], // Relacionamento 1:1
+                        captain: team.captain[0],
+                        members: (team.members || []).map(member => ({
+                            id: member.user?.[0]?.id || member.id,
+                            full_name: member.user?.[0]?.full_name || '',
+                            email: member.user?.[0]?.email || '',
+                            role_in_team: member.role_in_team,
+                            status: member.status
+                        }))
+                    }
+                }));
             // Combinar participações em equipes e inscrições diretas
-            const allParticipations = [...processedParticipations, ...processedRegistrations]
+            const allParticipations = [
+                ...processedParticipations,
+                ...teamsAsCaptainParticipations,
+                ...processedRegistrations
+            ]
             setMyParticipations(allParticipations)
 
             // 3. Buscar minhas avaliações
@@ -988,7 +1113,7 @@ export const CaptainDashboard: React.FC = () => {
     // Novo: status customizado para inscrição direta sem equipe
     const getStatusText = (status: string, participation?: MyParticipation) => {
         // Se for inscrição direta (sem equipe real) e evento ainda não ocorreu
-        if (participation && participation.team?.name === 'Inscrição Direta') {
+        if (status === 'inactive' && participation?.team?.event?.event_date) {
             const eventDate = participation.team?.event?.event_date;
             if (eventDate && new Date(eventDate) >= new Date()) {
                 return 'Aguardando alocar equipe';
@@ -1009,7 +1134,8 @@ export const CaptainDashboard: React.FC = () => {
             environment: 'Meio Ambiente',
             social: 'Social',
             culture: 'Cultura',
-            sports: 'Esportes'
+            sports: 'Esportes',
+
         }
         return categories[category as keyof typeof categories] || category
     }
@@ -1284,7 +1410,7 @@ export const CaptainDashboard: React.FC = () => {
                                 </div>
                             ) : (
                                 <div className="space-y-4">
-                                    {filteredParticipations.map((participation) => (
+                                        {filteredParticipations.map((participation) => (
                                         <div key={participation.id} className="bg-gray-50 rounded-lg p-4 border border-gray-200">
                                             <div className="flex items-start justify-between">
                                                 <div className="flex-1">
@@ -1298,7 +1424,8 @@ export const CaptainDashboard: React.FC = () => {
                                                     </div>
 
                                                     {/* Mostrar informações diferentes para equipes reais vs inscrições diretas */}
-                                                    {participation.team?.name === 'Inscrição Direta' ? (
+                                                        {/* Se a equipe for "Inscrição Direta", mostrar aguardando alocação */}
+                                                        {participation.team?.current_volunteers ? (
                                                         <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-3">
                                                             <div className="flex items-center space-x-2 mb-2">
                                                                 <AlertTriangle className="w-4 h-4 text-yellow-600" />
@@ -1318,7 +1445,7 @@ export const CaptainDashboard: React.FC = () => {
                                                                     </span>
                                                                 </div>
                                                                 <span className={`px-2 py-1 rounded-full text-xs font-medium ${participation.role_in_team === 'captain'
-                                                                    ? 'bg-purple-100 text-purple-800'
+                                                                            ? 'bg-purple-100 text-purple-800'
                                                                     : 'bg-green-100 text-green-800'
                                                                     }`}>
                                                                     {participation.role_in_team === 'captain' ? 'Capitão' : 'Voluntário'}
@@ -1333,10 +1460,10 @@ export const CaptainDashboard: React.FC = () => {
 
                                                             <div className="flex items-center space-x-4 text-sm text-blue-700">
                                                                 <span>
-                                                                    <strong>Capitão:</strong> {participation.team?.captain?.full_name}
+                                                                            <strong>Capitão:</strong> {participation.team.captain.full_name}
                                                                 </span>
                                                                 <span>
-                                                                    <strong>Membros:</strong> {participation.team?.current_volunteers}/{participation.team?.max_volunteers}
+                                                                            <strong>Membros:</strong> {participation.team.current_volunteers}/{participation.team?.members?.length || 0}
                                                                 </span>
                                                             </div>
 
