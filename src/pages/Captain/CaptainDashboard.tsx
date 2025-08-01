@@ -68,11 +68,14 @@ interface MyParticipation {
             email: string
         }
         members?: Array<{
-            id: string
-            full_name: string
-            email: string
-            role_in_team: 'captain' | 'volunteer'
-            status: 'active' | 'inactive' | 'removed'
+            id: string; // ID da tabela team_members
+            role_in_team: 'captain' | 'volunteer';
+            status: 'active' | 'inactive' | 'removed';
+            user?: { // Objeto 'user' com os dados do perfil
+                id: string;
+                full_name: string;
+                email: string;
+            };
         }>
     }
     registration_id?: string
@@ -1049,7 +1052,7 @@ export const CaptainDashboard: React.FC = () => {
                             ) : (
                                 <div className="space-y-4">
                                         {filteredParticipations.map((participation) => (  
-                                            console.log('DADOS DA PARTICIPAÇÃO A SER RENDERIZADA:', JSON.stringify(participation, null, 2)),
+                                            //console.log('DADOS DA PARTICIPAÇÃO A SER RENDERIZADA:', JSON.stringify(participation, null, 2)),
                                         <div key={participation.id} className="bg-gray-50 rounded-lg p-4 border border-gray-200">
                                             <div className="flex items-start justify-between">
                                                 <div className="flex-1">
@@ -1064,12 +1067,11 @@ export const CaptainDashboard: React.FC = () => {
 
                                                             {/* <<< CORREÇÃO FINAL: Exibição da lista de membros >>> */}
                                                         <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-3">
+                                                            {/* Nome da Equipe */}
                                                             <div className="flex items-center justify-between mb-2">
                                                                 <div className="flex items-center space-x-2">
                                                                     <Users className="w-4 h-4 text-blue-600" />
-                                                                    <span className="text-sm font-medium text-blue-800">
-                                                                        {participation.team?.name}
-                                                                    </span>
+                                                                    <span className="text-sm font-medium text-blue-800">{participation.team?.name}</span>
                                                                 </div>
                                                                     {/* Mostra a tag de Capitão apenas se for uma equipe real */}
                                                                     {participation.team?.name !== 'Inscrição Direta' && (
@@ -1083,30 +1085,31 @@ export const CaptainDashboard: React.FC = () => {
                                                             </div>
                                                                 {/* Capitão e Lista de Membros */}
                                                                 <div className="text-sm text-blue-700 space-y-2">
-                                                                    <div>
-                                                                        <strong>Capitão:</strong> {participation.team.captain.full_name}
-                                                            </div>
+                                                                <div>
+                                                                    <strong>Capitão:</strong> {participation.team.captain?.full_name}
+                                                                </div>
 
                                                                     {/* Renderiza a lista de membros apenas se houver mais de uma pessoa */}
-                                                                    {participation.team?.members && participation.team.members.length > 1 && (
-                                                                        <div className="pt-2">
-                                                                    <p className="text-xs font-medium text-blue-800 mb-1">Membros da Equipe:</p>
-                                                                    <div className="flex flex-wrap gap-1">
-                                                                        {participation.team.members
-                                                                                    .filter(member => member.status === 'active' && member.id !== participation.team.captain.id)
-                                                                            .map((member) => (
-                                                                                <span
-                                                                                    key={member.id}
-                                                                                    className="px-2 py-1 rounded text-xs bg-gray-100 text-gray-700 border border-gray-200"
-                                                                                >
-                                                                                    {member.full_name}
-                                                                                </span>
-                                                                            ))}
+                                                                {/* Lógica final para renderizar a lista de membros */}
+                                                                {participation.team.name !== 'Inscrição Direta' && participation.team.members && (
+                                                                    <div className="pt-2">
+                                                                        <p className="text-xs font-medium text-blue-800 mb-1">Membros da Equipe:</p>
+                                                                        <div className="flex flex-wrap gap-1">
+                                                                            {participation.team.members                                                                            
+                                                                                .filter(member => member.status === 'active' && member.user?.id !== user?.id) // Exclui o usuário atual                                                                   
+                                                                                .map((member) => (
+                                                                                    <span
+                                                                                        key={member.id}
+                                                                                        className="px-2 py-1 rounded text-xs bg-gray-100 text-gray-700 border border-gray-200"
+                                                                                    >
+                                                                                        {member.user?.full_name}
+                                                                                    </span>
+                                                                                ))}
+                                                                        </div>
                                                                     </div>
-                                                                </div>
-                                                            )}
-                                                        </div>
+                                                                )}
                                                             </div>
+                                                        </div>
 
                                                             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-gray-600 mt-4">
                                                         <div className="flex items-center space-x-2">
