@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase, Event, EventRegistration } from '../../lib/supabase'
 import { useAuth } from '../../hooks/useAuth'
@@ -15,6 +15,20 @@ import {
   AlertCircle
 } from 'lucide-react'
 
+// --- FUNÇÃO AUXILIAR PARA CONTAR VOLUNTÁRIOS ---
+// Centraliza a lógica de contagem para ser reutilizada
+const getEventVolunteerCount = (event: Event): { current: number; max: number } => {
+  const confirmedRegistrations = event.event_registrations?.filter(
+    (reg: EventRegistration) => reg.status === 'confirmed'
+  ).length || 0;
+
+  return {
+    current: confirmedRegistrations,
+    max: event.max_volunteers || 0,
+  };
+};
+
+
 export const EventsList: React.FC = () => {
   const { user } = useAuth()
   const [events, setEvents] = useState<Event[]>([])
@@ -22,72 +36,15 @@ export const EventsList: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('')
   const [filterStatus, setFilterStatus] = useState<string>('all')
   const [filterCategory, setFilterCategory] = useState<string>('all')
-  const [stats, setStats] = useState({
-    totalEvents: 0,
-    activeEvents: 0,
-    completedEvents: 0,
-    totalVolunteers: 0,
-    availableSpots: 0,
-    occupancyRate: 0
-  })
 
+  // 1. useEffect foi simplificado para uma única chamada de busca de dados
   useEffect(() => {
     fetchEvents()
-    fetchStats()
   }, [])
 
-  const fetchStats = async () => {
-    try {
-      // Buscar estatísticas dos eventos
-      const { data: eventsData, error: eventsError } = await supabase
-        .from('events')
-        .select(`
-          *,
-          teams(current_volunteers, max_volunteers),
-          event_registrations(id, status)
-        `)
-
-      if (eventsError) throw eventsError
-
-      // Calcular estatísticas
-      const totalEvents = eventsData?.length || 0
-      const activeEvents = eventsData?.filter(e => e.status === 'published' && new Date(e.event_date) >= new Date()).length || 0
-      const completedEvents = eventsData?.filter(e => e.status === 'completed' || new Date(e.event_date) < new Date()).length || 0
-
-      let totalVolunteers = 0
-      let totalMaxVolunteers = 0
-
-      eventsData?.forEach(event => {
-        // Contar voluntários das inscrições diretas (confirmadas)
-        const directRegistrations = event.event_registrations?.filter((reg: EventRegistration) => reg.status === 'confirmed').length || 0
-
-        // Contar voluntários das equipes já formadas
-        const teamVolunteers = event.teams?.reduce((sum: number, team: { current_volunteers: number }) => sum + team.current_volunteers, 0) || 0
-
-        // Total de voluntários = inscrições diretas + voluntários em equipes
-        totalVolunteers += directRegistrations + teamVolunteers
-
-        // Usar max_volunteers do evento como limite máximo
-        totalMaxVolunteers += event.max_volunteers || 0
-      })
-
-      const availableSpots = totalMaxVolunteers - totalVolunteers
-      const occupancyRate = totalMaxVolunteers > 0 ? Math.round((totalVolunteers / totalMaxVolunteers) * 100) : 0
-
-      setStats({
-        totalEvents,
-        activeEvents,
-        completedEvents,
-        totalVolunteers,
-        availableSpots,
-        occupancyRate
-      })
-    } catch (error) {
-      console.error('Erro ao buscar estatísticas:', error)
-    }
-  }
-
+  // 2. Apenas uma função para buscar todos os dados necessários
   const fetchEvents = async () => {
+    setLoading(true)
     try {
       const { data, error } = await supabase
         .from('events')
@@ -97,7 +54,6 @@ export const EventsList: React.FC = () => {
           teams(current_volunteers, max_volunteers),
           event_registrations(id, status)
         `)
-        .eq('status', 'published')
         .order('event_date', { ascending: true })
 
       if (error) throw error
@@ -109,10 +65,51 @@ export const EventsList: React.FC = () => {
     }
   }
 
+  // 3. As estatísticas são calculadas com useMemo a partir dos eventos já carregados
+  // Isso evita chamadas extras à API e é mais performático
+  const stats = useMemo(() => {
+    if (events.length === 0) {
+      return {
+        totalEvents: 0,
+        activeEvents: 0,
+        completedEvents: 0,
+        totalVolunteers: 0,
+        availableSpots: 0,
+        occupancyRate: 0,
+      };
+    }
+
+    const totalEvents = events.length
+    const activeEvents = events.filter(e => e.status === 'published' && new Date(e.event_date) >= new Date()).length
+    const completedEvents = events.filter(e => e.status === 'completed' || new Date(e.event_date) < new Date()).length
+
+    let totalVolunteers = 0
+    let totalMaxVolunteers = 0
+
+    events.forEach(event => {
+      const count = getEventVolunteerCount(event); // Usando a função auxiliar
+      totalVolunteers += count.current;
+      totalMaxVolunteers += count.max;
+    });
+
+    const availableSpots = totalMaxVolunteers - totalVolunteers
+    const occupancyRate = totalMaxVolunteers > 0 ? Math.round((totalVolunteers / totalMaxVolunteers) * 100) : 0
+
+    return {
+      totalEvents,
+      activeEvents,
+      completedEvents,
+      totalVolunteers,
+      availableSpots,
+      occupancyRate
+    }
+  }, [events]) // O cálculo só é refeito quando a lista de eventos muda
+
+  // Filtragem de eventos para exibição
   const filteredEvents = events.filter(event => {
     const matchesSearch = event.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         event.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         event.location.toLowerCase().includes(searchTerm.toLowerCase())
+      event.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      event.location.toLowerCase().includes(searchTerm.toLowerCase())
     
     const matchesStatus = filterStatus === 'all' || event.status === filterStatus
     const matchesCategory = filterCategory === 'all' || event.category === filterCategory
@@ -120,6 +117,7 @@ export const EventsList: React.FC = () => {
     return matchesSearch && matchesStatus && matchesCategory
   })
 
+  // Funções de formatação
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('pt-BR', {
       day: '2-digit',
@@ -132,20 +130,10 @@ export const EventsList: React.FC = () => {
     return timeString.slice(0, 5)
   }
 
+  // Função para verificar se o evento está lotado, agora usando a função auxiliar
   const isEventFull = (event: Event) => {
-    // Contar voluntários das inscrições diretas (confirmadas)
-    const directRegistrations = event.event_registrations?.filter((reg: EventRegistration) => reg.status === 'confirmed').length || 0
-
-    // Contar voluntários das equipes já formadas
-    const teamVolunteers = event.teams?.reduce((sum, team) => sum + team.current_volunteers, 0) || 0
-
-    // Total de voluntários = inscrições diretas + voluntários em equipes
-    const totalCurrentVolunteers = directRegistrations + teamVolunteers
-
-    // Usar max_volunteers do evento como limite máximo
-    const totalMaxVolunteers = event.max_volunteers || 0
-
-    return totalCurrentVolunteers >= totalMaxVolunteers
+    const count = getEventVolunteerCount(event);
+    return count.current >= count.max;
   }
 
   if (loading) {
@@ -177,7 +165,7 @@ export const EventsList: React.FC = () => {
         ) : null}
       </div>
 
-      {/* Panorama Geral - Statistics Dashboard */}
+      {/* Panorama Geral - Statistics Dashboard (agora usando os dados de 'useMemo') */}
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
         <h2 className="text-xl font-semibold text-gray-900 mb-6">Panorama Geral</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-6">
@@ -359,22 +347,9 @@ export const EventsList: React.FC = () => {
                   </div>
                   <div className="flex items-center space-x-2 text-sm text-gray-600">
                     <Users className="w-4 h-4 text-gray-400" />
+                    {/* Contagem de voluntários no card, agora mais limpa */}
                     <span>
-                      {(() => {
-                        // Contar voluntários das inscrições diretas (confirmadas)
-                        const directRegistrations = event.event_registrations?.filter((reg: EventRegistration) => reg.status === 'confirmed').length || 0
-
-                        // Contar voluntários das equipes já formadas
-                        const teamVolunteers = event.teams?.reduce((sum, team) => sum + team.current_volunteers, 0) || 0
-
-                        // Total de voluntários = inscrições diretas + voluntários em equipes
-                        const totalCurrentVolunteers = directRegistrations + teamVolunteers
-
-                        // Usar max_volunteers do evento como limite máximo
-                        const totalMaxVolunteers = event.max_volunteers || 0
-
-                        return `${totalCurrentVolunteers}/${totalMaxVolunteers} voluntários`
-                      })()}
+                      {`${getEventVolunteerCount(event).current}/${getEventVolunteerCount(event).max} voluntários`}
                     </span>
                   </div>
                 </div>
