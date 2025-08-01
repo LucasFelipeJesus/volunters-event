@@ -15,22 +15,11 @@ import {
     Search,
     LogOut,
     FileText,
-    AlertTriangle
+    AlertTriangle // Mantido pois é usado na aba 'Histórico'
 } from 'lucide-react'
 
-// (Removido estado não utilizado de evaluations)
-
 // Tipos específicos para o dashboard do voluntário
-interface TeamMemberRaw {
-    id: string
-    role_in_team: 'captain' | 'volunteer'
-    status: 'active' | 'inactive' | 'removed'
-    user?: {
-        id: string
-        full_name: string
-        email: string
-    }
-}
+
 
 interface VolunteerEvent {
     id: string
@@ -71,6 +60,7 @@ interface MyParticipation {
             location: string
             status: string
             category: string
+            max_volunteers?: number
         }
         captain: {
             id: string
@@ -160,493 +150,122 @@ export const CaptainDashboard: React.FC = () => {
         bestCategory: ''
     })
 
+    // SUBSTITUA A FUNÇÃO 'fetchVolunteerData' INTEIRA POR ESTA VERSÃO FINAL
     const fetchVolunteerData = useCallback(async () => {
         if (!user) return
 
         try {
             setLoading(true)
 
-            // 1. Buscar eventos disponíveis para inscrição
+            // --- As buscas de dados iniciais permanecem as mesmas ---
             const today = new Date().toISOString().split('T')[0]
-
-            // Buscar todos os eventos publicados
-            const { data: eventsData, error: eventsError } = await supabase
-                .from('events')
-                .select('*')
-                .eq('status', 'published')
-                .gte('event_date', today)
-                .order('event_date', { ascending: true })
-
-            if (eventsError) {
-                console.error('Erro ao buscar eventos:', eventsError)
-                throw eventsError
-            }
-
-            // Buscar todas as inscrições do usuário
-            const { data: userRegistrations, error: registrationsError } = await supabase
-                .from('event_registrations')
-                .select('event_id, status')
-                .eq('user_id', user.id)
-                .in('status', ['confirmed', 'pending'])
-
-            if (registrationsError) {
-                console.error('Erro ao buscar inscrições do usuário:', registrationsError)
-            }
-
-            // Criar um mapa das inscrições ATIVAS do usuário para consulta rápida
+            const { data: eventsData, error: eventsError } = await supabase.from('events').select('*').eq('status', 'published').gte('event_date', today).order('event_date', { ascending: true })
+            if (eventsError) throw eventsError
+            const { data: userRegistrations } = await supabase.from('event_registrations').select('event_id, status').eq('user_id', user.id).in('status', ['confirmed', 'pending'])
             const userRegistrationMap = new Map()
-            if (userRegistrations) {
-                userRegistrations.forEach(reg => {
-                    // Apenas considerar inscrições ativas (confirmed ou pending)
-                    if (reg.status === 'confirmed' || reg.status === 'pending') {
-                        userRegistrationMap.set(reg.event_id, reg.status)
-                    }
-                })
-            }
-
-            // Para cada evento, buscar o total de inscrições
+            if (userRegistrations) { userRegistrations.forEach(reg => { if (reg.status === 'confirmed' || reg.status === 'pending') { userRegistrationMap.set(reg.event_id, reg.status) } }) }
             const eventsWithRegistrationInfo = await Promise.all(
                 (eventsData || []).map(async (event) => {
-                    const { data: eventRegistrations, error: eventRegError } = await supabase
-                        .from('event_registrations')
-                        .select('id, status')
-                        .eq('event_id', event.id)
-                        .in('status', ['confirmed', 'pending'])
-
-                    if (eventRegError) {
-                        console.error(`Erro ao buscar inscrições do evento ${event.id}:`, eventRegError)
-                        return event
-                    }
-
-                    return {
-                        ...event,
-                        event_registrations: eventRegistrations || []
-                    }
-                })
-            )
-
-            console.log('Dados brutos dos eventos:', eventsWithRegistrationInfo)
-
-            // Processar eventos para incluir informações de inscrição
-            const processedEvents: VolunteerEvent[] = eventsWithRegistrationInfo.map((event) => {
-                // Debug: verificar dados brutos do evento
-                console.log(`DEBUG RAW - Evento: ${event.title}`, {
-                    eventId: event.id,
-                    maxVolunteers: event.max_volunteers,
-                    registrations: event.event_registrations?.length || 0,
-                    registrationsRaw: event.event_registrations,
-                    userRegistrationStatus: userRegistrationMap.get(event.id)
-                })
-
-                // Usar max_volunteers do evento como total de vagas
-                const totalSpots = event.max_volunteers || 0
-
-                // Calcular inscrições ativas e verificar se usuário está inscrito
-                let activeRegistrations = 0
-                const isUserRegistered = userRegistrationMap.has(event.id)
-
-                if (event.event_registrations) {
-                    activeRegistrations = event.event_registrations.length
-                }
-
-                const availableSpots = Math.max(0, totalSpots - activeRegistrations)
-
-                // Debug final
-                console.log(`DEBUG FINAL - Evento: ${event.title}`, {
-                    totalSpots,
-                    activeRegistrations,
-                    availableSpots,
-                    isUserRegistered
-                })
-
-                return {
-                    id: event.id,
-                    title: event.title,
-                    description: event.description,
-                    event_date: event.event_date,
-                    start_time: event.start_time,
-                    end_time: event.end_time,
-                    location: event.location,
-                    status: event.status,
-                    category: event.category,
-                    image_url: event.image_url,
-                    isUserRegistered,
-                    availableSpots,
-                    totalSpots
-                }
+                const { count } = await supabase.from('event_registrations').select('*', { count: 'exact', head: true }).eq('event_id', event.id).in('status', ['confirmed', 'pending'])
+                return { ...event, current_registrations: count || 0 }
             })
-
+        )
+            const processedEvents: VolunteerEvent[] = eventsWithRegistrationInfo.map((event) => {
+            const totalSpots = event.max_volunteers || 0
+            const availableSpots = Math.max(0, totalSpots - (event.current_registrations || 0))
+            return {
+                id: event.id, title: event.title, description: event.description,
+                event_date: event.event_date, start_time: event.start_time, end_time: event.end_time,
+                location: event.location, status: event.status, category: event.category,
+                image_url: event.image_url, isUserRegistered: userRegistrationMap.has(event.id), availableSpots, totalSpots
+            }
+        })
             setAvailableEvents(processedEvents)
 
-            // 2. Buscar minhas participações em equipes
-            const { data: participationsData } = await supabase
-                .from('team_members')
-                .select(`
-          *,
-          team:teams(
-            id,
-            name,
-            description,
-            max_volunteers,
-            current_volunteers,
-            event:events(
-              id,
-              title,
-              event_date,
-              start_time,
-              end_time,
-              location,
-              status,
-              category
-            ),
-            captain:users!teams_captain_id_fkey(
-              id,
-              full_name,
-              email
-            ),
-            members:team_members(
-              id,
-              role_in_team,
-              status,
-              user:users(
-                id,
-                full_name,
-                email
-              )
-            )
-          )
-        `)
-                .eq('user_id', user.id)
-                .order('joined_at', { ascending: false })
+            // --- Processamento das participações (sem alterações) ---
+            const { data: participationsData } = await supabase.from('team_members').select(`*, team:teams(id, name, description, max_volunteers, current_volunteers, event:events(*), captain:users!teams_captain_id_fkey(*), members:team_members(id, role_in_team, status, user:users(*)))`).eq('user_id', user.id).order('joined_at', { ascending: false })
+            const { data: registrationsData } = await supabase.from('event_registrations').select(`*, events!inner(*)`).eq('user_id', user.id).in('status', ['pending', 'confirmed'])
+            const { data: teamsAsCaptainData } = await supabase.from('teams').select(`*, event:events(*), captain:users!teams_captain_id_fkey(*), members:team_members(id, role_in_team, status, user:users(*))`).eq('captain_id', user.id)
 
-            // 2.1. Buscar minhas inscrições diretas em eventos
-            const { data: registrationsData, error: regError } = await supabase
-                .from('event_registrations')
-                .select(`
-                    id,
-                    event_id,
-                    user_id,
-                    status,
-                    registered_at,
-                    events!inner(
-                        id,
-                        title,
-                        event_date,
-                        start_time,
-                        end_time,
-                        location,
-                        status,
-                        category
-                    )
-                `)
-                .eq('user_id', user.id)
-                .in('status', ['pending', 'confirmed'])
-                .order('registered_at', { ascending: false })
-
-            if (regError) {
-                console.error('Erro ao buscar inscrições:', regError)
-            }
-
-            // Processar participações para adicionar flag de pode sair e formatar membros
-            const processedParticipations: MyParticipation[] = (participationsData || []).map(participation => {
-                // Processar membros da equipe
-                const members = participation.team?.members?.map((member: TeamMemberRaw) => ({
-                    id: member.user?.id || member.id,
-                    full_name: member.user?.full_name || '',
-                    email: member.user?.email || '',
-                    role_in_team: member.role_in_team,
-                    status: member.status
-                })) || []
-
+            const processedParticipations: MyParticipation[] = (participationsData || []).map(p => ({
+                id: p.id, team_id: p.team_id, role_in_team: p.role_in_team, status: p.status, joined_at: p.joined_at,
+                can_leave: p.status === 'active' && new Date(p.team?.event?.event_date || '') > new Date(),
+                team: p.team
+            }))
+            const teamsAsCaptainParticipations: MyParticipation[] = (teamsAsCaptainData || []).map(team => ({
+                id: `captain_${team.id}`, team_id: team.id, role_in_team: 'captain', status: 'active', joined_at: team.created_at, can_leave: false,
+                team: team
+            }));
+            const processedRegistrations: MyParticipation[] = (registrationsData || []).map(reg => {
+                const event = Array.isArray(reg.events) ? reg.events[0] : reg.events;
                 return {
-                    ...participation,
-                    can_leave: participation.status === 'active' &&
-                        new Date(participation.team?.event?.event_date || '') > new Date(),
-                    team: {
-                        ...participation.team,
-                        members
-                    }
-                }
-            })
+                id: `reg_${reg.id}`, team_id: `direct_${event?.id}`, status: 'active', role_in_team: 'volunteer', joined_at: reg.registered_at,
+                can_leave: true,
+                team: {
+                    id: `direct_${event?.id}`, name: 'Inscrição Direta', max_volunteers: event?.max_volunteers || 0, current_volunteers: 1, event: event,
+                    captain: { id: user.id, full_name: user.full_name || 'Usuário', email: user.email || '' },
+                    members: [{ id: user.id, full_name: user.full_name || 'Usuário', email: user.email || '', role_in_team: 'volunteer', status: 'active' }]
+                },
+                registration_id: reg.id
+            };
+        });
 
-            // Processar inscrições diretas para o formato de participações
-            const processedRegistrations: MyParticipation[] = (registrationsData || []).map(registration => {
-                // O Supabase com inner join pode retornar como array, então pegamos o primeiro elemento
-                const event = Array.isArray(registration.events) ? registration.events[0] : registration.events
-
-                console.log('DEBUG - Processando inscrição direta:', {
-                    registrationId: registration.id,
-                    status: registration.status,
-                    event: event,
-                    eventDate: event?.event_date,
-                    eventsRaw: registration.events
-                })
-
-                return {
-                    id: `reg_${registration.id}`,
-                    user_id: registration.user_id,
-                    team_id: `direct_${event?.id}`,
-                    status: registration.status === 'confirmed' ? 'active' : 'inactive',
-                    role_in_team: 'volunteer' as const,
-                    joined_at: registration.registered_at || '',
-                    can_leave: ['pending', 'confirmed'].includes(registration.status) &&
-                        new Date(event?.event_date || '') > new Date(),
-                    team: {
-                        id: `direct_${event?.id}`,
-                        name: 'Inscrição Direta',
-                        max_volunteers: 0,
-                        current_volunteers: 0,
-                        event: event,
-                        captain: {
-                            id: user.id,
-                            full_name: user.full_name || 'Usuário',
-                            email: user.email || ''
-                        }
-                    },
-                    registration_id: registration.id // Identificador para cancelar inscrição
-                }
-            })
-            // Após processedParticipations e processedRegistrations, dentro do fetchVolunteerData
-
-            // Crie as interfaces intermediárias para mapear exatamente como o Supabase retorna
-
-            interface TeamMemberRawSupabase {
-                id: string;
-                role_in_team: 'captain' | 'volunteer';
-                status: 'active' | 'inactive' | 'removed';
-                user?: {
-                    id: string;
-                    full_name: string;
-                    email: string;
-                }[]; // user como array!
-            }
-
-            interface TeamEventSupabase {
-                id: string;
-                title: string;
-                description: string;
-                event_date: string;
-                start_time: string;
-                end_time: string;
-                location: string;
-                status: string;
-                category: string;
-                image_url?: string;
-            }
-
-            interface TeamCaptainSupabase {
-                id: string;
-                full_name: string;
-                email: string;
-            }
-
-            interface TeamRawSupabase {
-                id: string;
-                name: string;
-                description?: string;
-                max_volunteers: number;
-                current_volunteers: number;
-                event: TeamEventSupabase[];
-                captain: TeamCaptainSupabase[];
-                members?: TeamMemberRawSupabase[];
-            }
-
-            // ... dentro do seu fetchVolunteerData, após processedParticipations e processedRegistrations
-
-            const { data: teamsAsCaptain, error: teamsAsCaptainError } = await supabase
-                .from('teams')
-                .select(`
-        id,
-        name,
-        description,
-        max_volunteers,
-        current_volunteers,
-        event:events(
-            id,
-            title,
-            description,
-            event_date,
-            start_time,
-            end_time,
-            location,
-            status,
-            category,
-            image_url
-        ),
-        captain:users(
-            id,
-            full_name,
-            email
-        ),
-        members:team_members(
-            id,
-            role_in_team,
-            status,
-            user:users(
-                id,
-                full_name,
-                email
-            )
-        )
-    `)
-                .eq('captain_id', user.id);
-
-            if (teamsAsCaptainError) {
-                console.error('Erro ao buscar equipes onde sou capitão:', teamsAsCaptainError);
-            }
-
-            const teamsAsCaptainData = (teamsAsCaptain || []) as unknown as TeamRawSupabase[];
-
-            const teamsAsCaptainParticipations: MyParticipation[] = teamsAsCaptainData
-                // Só adiciona se o capitão não for membro formal (para evitar duplicidade)
-                .filter(team =>
-                    !(team.members || []).some(member =>
-                        (member.user?.[0]?.id || member.id) === user.id
-                    )
-                )
-                .map(team => ({
-                    id: `captain_${team.id}`,
-                    team_id: team.id,
-                    role_in_team: 'captain',
-                    status: 'active',
-                    joined_at: '',
-                    can_leave: false,
-                    team: {
-                        id: team.id,
-                        name: team.name,
-                        description: team.description,
-                        max_volunteers: team.max_volunteers,
-                        current_volunteers: team.current_volunteers,
-                        event: team.event[0], // Relacionamento 1:1
-                        captain: team.captain[0],
-                        members: (team.members || []).map(member => ({
-                            id: member.user?.[0]?.id || member.id,
-                            full_name: member.user?.[0]?.full_name || '',
-                            email: member.user?.[0]?.email || '',
-                            role_in_team: member.role_in_team,
-                            status: member.status
-                        }))
-                    }
-                }));
-            // Combinar participações em equipes e inscrições diretas
-            const allParticipations = [
+            // <<< CORREÇÃO FINAL NA LÓGICA DE COMBINAÇÃO E FILTRO >>>
+            // 1. Juntar todas as participações possíveis.
+            const allPossibleParticipations = [
+                ...processedRegistrations,
                 ...processedParticipations,
-                ...teamsAsCaptainParticipations,
-                ...processedRegistrations
-            ]
-            setMyParticipations(allParticipations)
+                ...teamsAsCaptainParticipations
+            ];
 
-            // 3. Buscar minhas avaliações
-            const { data: evaluationsData } = await supabase
-                .from('evaluations')
-                .select(`
-          *,
-          captain:users!evaluations_captain_id_fkey(
-            id,
-            full_name
-          ),
-          event:events(
-            id,
-            title,
-            event_date
-          ),
-          team:teams(
-            id,
-            name
-          )
-        `)
-                .eq('volunteer_id', user.id)
-                .order('created_at', { ascending: false })
+            // 2. Criar um mapa de participações únicas, dando prioridade para a mais completa.
+            const uniqueParticipationsMap = new Map<string, MyParticipation>();
 
+            // Função para determinar a "qualidade" da informação
+            const getPriority = (p: MyParticipation): number => {
+                if (p.role_in_team === 'captain') return 3; // Capitão é a mais importante
+                if (p.team.name !== 'Inscrição Direta') return 2; // Membro de equipe real
+                return 1; // Inscrição direta é a menos importante
+            };
+
+            allPossibleParticipations.forEach(p => {
+                const eventId = p.team?.event?.id;
+                if (!eventId) return;
+
+            const existing = uniqueParticipationsMap.get(eventId);
+
+            // Se não existe, adiciona. Se a nova participação for de maior prioridade que a existente, substitui.
+            if (!existing || getPriority(p) > getPriority(existing)) {
+                uniqueParticipationsMap.set(eventId, p);
+            }
+        });
+
+            const finalParticipations = Array.from(uniqueParticipationsMap.values());
+            setMyParticipations(finalParticipations);
+
+            // O resto da função continua igual, mas usando 'finalParticipations' para as estatísticas
+            const { data: evaluationsData } = await supabase.from('evaluations').select(`*, captain:users!evaluations_captain_id_fkey(id, full_name), event:events(id, title, event_date), team:teams(id, name)`).eq('volunteer_id', user.id).order('created_at', { ascending: false })
             setMyEvaluations(evaluationsData || [])
 
-
-            // 4. Calcular estatísticas considerando eventos únicos
-            const currentDate = new Date()
-            currentDate.setHours(0, 0, 0, 0)
-
-            // Mapear participações para eventos únicos (por event_id)
-            const uniqueEventMap = new Map<string, MyParticipation>()
-            allParticipations.forEach(p => {
-                const eventId = p.team?.event?.id
-                if (eventId && (!uniqueEventMap.has(eventId) || (uniqueEventMap.get(eventId)?.status !== 'active' && p.status === 'active'))) {
-                    // Prioriza status 'active' se houver duplicidade
-                    uniqueEventMap.set(eventId, p)
-                }
-            })
-
-            // Participações ativas: eventos únicos onde status é 'active' e evento não ocorreu
-            const activeParticipations = Array.from(uniqueEventMap.values()).filter(p => {
-                let motivo = '';
-                let isConfirmed = false;
-                if (p.id?.startsWith('reg_')) {
-                    isConfirmed = p.status === 'active' && p.registration_id !== undefined;
-                } else {
-                    isConfirmed = p.status === 'active';
-                }
-                if (!isConfirmed) {
-                    motivo = 'Status não é active';
-                    console.log('[DEBUG PARTICIPAÇÃO DESCARTADA]', { participacao: p, motivo });
-                    return false;
-                }
-                const event = p.team?.event;
-                if (!event) {
-                    motivo = 'Sem evento vinculado';
-                    console.log('[DEBUG PARTICIPAÇÃO DESCARTADA]', { participacao: p, motivo });
-                    return false;
-                }
-                if (event.status !== 'published') {
-                    motivo = `Status do evento não é published (${event.status})`;
-                    console.log('[DEBUG PARTICIPAÇÃO DESCARTADA]', { participacao: p, motivo });
-                    return false;
-                }
-                const eventDate = event.event_date;
-                if (!eventDate) {
-                    motivo = 'Evento sem data';
-                    console.log('[DEBUG PARTICIPAÇÃO DESCARTADA]', { participacao: p, motivo });
-                    return false;
-                }
-                const eventDateTime = new Date(eventDate);
-                eventDateTime.setHours(0, 0, 0, 0);
-                if (!(eventDateTime >= currentDate)) {
-                    motivo = `Data do evento já passou (${eventDate})`;
-                    console.log('[DEBUG PARTICIPAÇÃO DESCARTADA]', { participacao: p, motivo });
-                    return false;
-                }
-                // Se chegou aqui, é ativa
-                console.log('[DEBUG PARTICIPAÇÃO ATIVA]', { participacao: p });
-                return true;
-            }).length;
-
-            // Eventos concluídos: eventos únicos já ocorridos ou status completed
-            const completedEvents = Array.from(uniqueEventMap.values()).filter(p =>
-                p.team?.event?.status === 'completed' ||
-                new Date(p.team?.event?.event_date || '') < new Date()
-            ).length
-
-            const avgRating = evaluationsData && evaluationsData.length > 0
-                ? evaluationsData.reduce((sum, evaluation) => sum + evaluation.rating, 0) / evaluationsData.length
-                : 0
-
-            // Categoria mais participada
-            const categoryCount = new Map()
-            Array.from(uniqueEventMap.values()).forEach(p => {
-                const category = p.team?.event?.category || 'other'
-                categoryCount.set(category, (categoryCount.get(category) || 0) + 1)
-            })
-
-            const bestCategory = categoryCount.size > 0
-                ? Array.from(categoryCount.entries()).reduce((a, b) => a[1] > b[1] ? a : b)[0]
-                : ''
-
+            const currentDate = new Date();
+            currentDate.setHours(0, 0, 0, 0);
+            const activeParticipations = finalParticipations.filter(p => p.status === 'active' && new Date(p.team.event.event_date) >= currentDate).length;
+            const completedEvents = finalParticipations.filter(p => new Date(p.team.event.event_date) < new Date()).length;
+            const avgRating = evaluationsData && evaluationsData.length > 0 ? evaluationsData.reduce((sum, e) => sum + e.rating, 0) / evaluationsData.length : 0;
+            const categoryCount = new Map();
+            finalParticipations.forEach(p => {
+                const category = p.team?.event?.category || 'other';
+                categoryCount.set(category, (categoryCount.get(category) || 0) + 1);
+            });
+            const bestCategory = categoryCount.size > 0 ? Array.from(categoryCount.entries()).reduce((a, b) => a[1] > b[1] ? a : b)[0] : '';
             setStats({
-                totalParticipations: uniqueEventMap.size,
-                activeParticipations,
-                completedEvents,
-                averageRating: Math.round(avgRating * 10) / 10,
-                totalEvaluations: evaluationsData?.length || 0,
-                bestCategory
-            })
+            totalParticipations: finalParticipations.length,
+            activeParticipations,
+            completedEvents,
+            averageRating: Math.round(avgRating * 10) / 10,
+            totalEvaluations: evaluationsData?.length || 0,
+            bestCategory
+        });
 
         } catch (error) {
             console.error('Erro ao carregar dados do voluntário:', error)
@@ -1113,6 +732,9 @@ export const CaptainDashboard: React.FC = () => {
     // Novo: status customizado para inscrição direta sem equipe
     const getStatusText = (status: string, participation?: MyParticipation) => {
         // Se for inscrição direta (sem equipe real) e evento ainda não ocorreu
+        if (participation?.team?.name === 'Inscrição Direta' && participation.status === 'active') {
+            return 'Ativo';
+        }
         if (status === 'inactive' && participation?.team?.event?.event_date) {
             const eventDate = participation.team?.event?.event_date;
             if (eventDate && new Date(eventDate) >= new Date()) {
@@ -1149,15 +771,29 @@ export const CaptainDashboard: React.FC = () => {
         return matchesSearch
     })
 
-    // Gerar participações únicas por evento (igual ao stats)
-    const uniqueEventMap = new Map<string, MyParticipation>()
+    const uniqueEventMap = new Map<string, MyParticipation>();
     myParticipations.forEach(p => {
-        const eventId = p.team?.event?.id
-        if (eventId && (!uniqueEventMap.has(eventId) || (uniqueEventMap.get(eventId)?.status !== 'active' && p.status === 'active'))) {
-            uniqueEventMap.set(eventId, p)
+        const eventId = p.team?.event?.id;
+        if (!eventId) return;
+
+        const existingParticipation = uniqueEventMap.get(eventId);
+
+        if (!existingParticipation) {
+            uniqueEventMap.set(eventId, p);
+            return;
         }
-    })
-    const participationsByEvent = Array.from(uniqueEventMap.values())
+
+        if (p.team.name !== 'Inscrição Direta' && existingParticipation.team.name === 'Inscrição Direta') {
+            uniqueEventMap.set(eventId, p);
+            return;
+        }
+
+        if (p.status === 'active' && existingParticipation.status !== 'active') {
+            uniqueEventMap.set(eventId, p);
+            return;
+        }
+    });
+    const participationsByEvent = Array.from(uniqueEventMap.values());
 
     const filteredParticipations = participationsByEvent.filter(participation => {
         const matchesSearch = participation.team?.event?.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -1175,6 +811,8 @@ export const CaptainDashboard: React.FC = () => {
     }
 
     return (
+
+
         <div className="space-y-6">
             {/* Header com boas-vindas e estatísticas */}
             <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
@@ -1410,7 +1048,8 @@ export const CaptainDashboard: React.FC = () => {
                                 </div>
                             ) : (
                                 <div className="space-y-4">
-                                        {filteredParticipations.map((participation) => (
+                                        {filteredParticipations.map((participation) => (  
+                                            console.log('DADOS DA PARTICIPAÇÃO A SER RENDERIZADA:', JSON.stringify(participation, null, 2)),
                                         <div key={participation.id} className="bg-gray-50 rounded-lg p-4 border border-gray-200">
                                             <div className="flex items-start justify-between">
                                                 <div className="flex-1">
@@ -1423,19 +1062,7 @@ export const CaptainDashboard: React.FC = () => {
                                                         </span>
                                                     </div>
 
-                                                    {/* Mostrar informações diferentes para equipes reais vs inscrições diretas */}
-                                                        {/* Se a equipe for "Inscrição Direta", mostrar aguardando alocação */}
-                                                        {participation.team?.current_volunteers ? (
-                                                        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-3">
-                                                            <div className="flex items-center space-x-2 mb-2">
-                                                                <AlertTriangle className="w-4 h-4 text-yellow-600" />
-                                                                <span className="text-sm font-medium text-yellow-800">Aguardando Alocação</span>
-                                                            </div>
-                                                            <p className="text-sm text-yellow-700">
-                                                                Você está inscrito no evento e aguardando ser alocado em uma equipe pelo organizador.
-                                                            </p>
-                                                        </div>
-                                                    ) : (
+                                                            {/* <<< CORREÇÃO FINAL: Exibição da lista de membros >>> */}
                                                         <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-3">
                                                             <div className="flex items-center justify-between mb-2">
                                                                 <div className="flex items-center space-x-2">
@@ -1444,54 +1071,44 @@ export const CaptainDashboard: React.FC = () => {
                                                                         {participation.team?.name}
                                                                     </span>
                                                                 </div>
+                                                                    {/* Mostra a tag de Capitão apenas se for uma equipe real */}
+                                                                    {participation.team?.name !== 'Inscrição Direta' && (
                                                                 <span className={`px-2 py-1 rounded-full text-xs font-medium ${participation.role_in_team === 'captain'
                                                                             ? 'bg-purple-100 text-purple-800'
                                                                     : 'bg-green-100 text-green-800'
                                                                     }`}>
                                                                     {participation.role_in_team === 'captain' ? 'Capitão' : 'Voluntário'}
                                                                 </span>
+                                                                    )}
+                                                            </div>
+                                                                {/* Capitão e Lista de Membros */}
+                                                                <div className="text-sm text-blue-700 space-y-2">
+                                                                    <div>
+                                                                        <strong>Capitão:</strong> {participation.team.captain.full_name}
                                                             </div>
 
-                                                            {participation.team?.description && (
-                                                                <p className="text-sm text-blue-700 mb-2">
-                                                                    <strong>Descrição:</strong> {participation.team.description}
-                                                                </p>
-                                                            )}
-
-                                                            <div className="flex items-center space-x-4 text-sm text-blue-700">
-                                                                <span>
-                                                                            <strong>Capitão:</strong> {participation.team.captain.full_name}
-                                                                </span>
-                                                                <span>
-                                                                            <strong>Membros:</strong> {participation.team.current_volunteers}/{participation.team?.members?.length || 0}
-                                                                </span>
-                                                            </div>
-
-                                                            {participation.team?.members && participation.team.members.length > 0 && (
-                                                                <div className="mt-2">
+                                                                    {/* Renderiza a lista de membros apenas se houver mais de uma pessoa */}
+                                                                    {participation.team?.members && participation.team.members.length > 1 && (
+                                                                        <div className="pt-2">
                                                                     <p className="text-xs font-medium text-blue-800 mb-1">Membros da Equipe:</p>
                                                                     <div className="flex flex-wrap gap-1">
                                                                         {participation.team.members
-                                                                            .filter(member => member.status === 'active')
+                                                                                    .filter(member => member.status === 'active' && member.id !== participation.team.captain.id)
                                                                             .map((member) => (
                                                                                 <span
                                                                                     key={member.id}
-                                                                                    className={`px-2 py-1 rounded text-xs ${member.role_in_team === 'captain'
-                                                                                        ? 'bg-purple-100 text-purple-700 border border-purple-200'
-                                                                                        : 'bg-gray-100 text-gray-700 border border-gray-200'
-                                                                                        }`}
+                                                                                    className="px-2 py-1 rounded text-xs bg-gray-100 text-gray-700 border border-gray-200"
                                                                                 >
                                                                                     {member.full_name}
-                                                                                    {member.role_in_team === 'captain' && ' (Capitão)'}
                                                                                 </span>
                                                                             ))}
                                                                     </div>
                                                                 </div>
                                                             )}
                                                         </div>
-                                                    )}
+                                                            </div>
 
-                                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-gray-600">
+                                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-gray-600 mt-4">
                                                         <div className="flex items-center space-x-2">
                                                             <Calendar className="w-4 h-4" />
                                                             <span>{formatDate(participation.team?.event?.event_date || '')}</span>
@@ -1531,6 +1148,7 @@ export const CaptainDashboard: React.FC = () => {
                         </div>
                     )}
 
+                    {/* <<< CORREÇÃO 2: Conteúdo das abas 'Avaliações' e 'Histórico' restaurado >>> */}
                     {/* Aba: Minhas Avaliações */}
                     {activeTab === 'evaluations' && (
                         <div className="space-y-4">
@@ -1556,7 +1174,6 @@ export const CaptainDashboard: React.FC = () => {
                                                     {renderStarRating(evaluation.rating)}
                                                 </div>
                                             </div>
-
                                             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-3">
                                                 <div className="text-sm">
                                                     <p className="text-gray-600">Trabalho em Equipe</p>
@@ -1571,7 +1188,6 @@ export const CaptainDashboard: React.FC = () => {
                                                     {renderStarRating(evaluation.communication_rating)}
                                                 </div>
                                             </div>
-
                                             {evaluation.comment && (
                                                 <div className="bg-white rounded p-3 border border-gray-200">
                                                     <p className="text-sm text-gray-700">
@@ -1622,12 +1238,10 @@ export const CaptainDashboard: React.FC = () => {
                                                                     Concluído
                                                                 </span>
                                                             </div>
-
                                                             <p className="text-sm text-gray-600 mb-3">
                                                                 <strong>Equipe:</strong> {participation.team?.name} •
                                                                 <strong> Categoria:</strong> {getCategoryLabel(participation.team?.event?.category || '')}
                                                             </p>
-
                                                             <div className="flex items-center space-x-4 text-sm text-gray-600">
                                                                 <div className="flex items-center space-x-2">
                                                                     <Calendar className="w-4 h-4" />
@@ -1639,7 +1253,6 @@ export const CaptainDashboard: React.FC = () => {
                                                                 </div>
                                                             </div>
                                                         </div>
-
                                                         <div className="text-right">
                                                             {evaluation ? (
                                                                 <div>
@@ -1687,5 +1300,4 @@ export const CaptainDashboard: React.FC = () => {
             />
         </div>
     )
-
 }
