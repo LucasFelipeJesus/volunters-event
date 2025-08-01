@@ -39,6 +39,7 @@ interface TeamMember {
 interface Team {
   id: string;
   name: string;
+  description?: string;
   event_id: string;
   captain_id: string;
   max_volunteers: number;
@@ -67,6 +68,7 @@ export const EditTeam: React.FC = () => {
   // Estados para edição
   const [editData, setEditData] = useState({
     name: '',
+    description: '',
     max_volunteers: 0,
     status: 'forming'
   });
@@ -171,6 +173,7 @@ export const EditTeam: React.FC = () => {
       setTeam(teamData)
       setEditData({
         name: teamData.name,
+        description: teamData.description || '',
         max_volunteers: teamData.max_volunteers,
         status: teamData.status
       })
@@ -214,6 +217,7 @@ export const EditTeam: React.FC = () => {
         .from('teams')
         .update({
           name: editData.name,
+          description: editData.description,
           max_volunteers: editData.max_volunteers,
           status: editData.status,
           updated_at: new Date().toISOString()
@@ -437,6 +441,17 @@ export const EditTeam: React.FC = () => {
                     value={editData.name}
                     onChange={(e) => setEditData({...editData, name: e.target.value})}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Descrição da Estação</label>
+                  <textarea
+                    title="Descrição da estação"
+                    value={editData.description}
+                    onChange={(e) => setEditData({...editData, description: e.target.value})}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    rows={3}
+                    placeholder="Descreva o que esta equipe fará e em que estação trabalhará..."
                   />
                 </div>
 
