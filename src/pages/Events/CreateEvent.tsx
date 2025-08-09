@@ -34,9 +34,6 @@ interface EventFormData {
 }
 
 export const CreateEvent: React.FC = () => {
-    // useForm deve ser declarado antes de qualquer uso de watch
-    // ...já declarado acima, remover duplicidade...
-
     const { user } = useAuth()
     const navigate = useNavigate()
     const [isLoading, setIsLoading] = useState(false)
@@ -44,9 +41,15 @@ export const CreateEvent: React.FC = () => {
     const [imageFile, setImageFile] = useState<File | null>(null)
     const [imagePreview, setImagePreview] = useState<string | null>(null)
     const [uploadingImage, setUploadingImage] = useState(false)
-
-    // Estado para os termos
     const [termsContent, setTermsContent] = useState('')
+
+    // --- FUNÇÃO DE AJUDA PARA FORMATAR A DATA PARA EXIBIÇÃO ---
+    // Converte "YYYY-MM-DD" para "DD/MM/YYYY" de forma segura.
+    const formatDateForDisplay = (dateString?: string) => {
+        if (!dateString) return '';
+        const [year, month, day] = dateString.split('-');
+        return `${day}/${month}/${year}`;
+    };
 
     // Função utilitária para gerar o texto do termo
     function gerarTextoTermoEvento(nomeEvento: string, cidade: string, dataEvento: string) {
@@ -60,22 +63,21 @@ export const CreateEvent: React.FC = () => {
         formState: { errors }
     } = useForm<EventFormData>({
         defaultValues: {
-            category: 'agenda-FS', // Categoria padrão
-            max_volunteers: 10, // Máximo de voluntários padrão
+            category: 'agenda-FS',
+            max_volunteers: 10,
             title: '',
             description: '',
             location: '',
-            event_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // 30 dias no futuro
+            event_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
             start_time: '09:00',
             end_time: '17:00',
-            registration_start_date: new Date().toISOString().split('T')[0], // hoje
-            registration_end_date: new Date(Date.now() + 25 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // 25 dias no futuro
+            registration_start_date: new Date().toISOString().split('T')[0],
+            registration_end_date: new Date(Date.now() + 25 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
             requirements: '',
             image_url: ''
         }
     })
 
-    // As variáveis que usam watch devem ser declaradas após o hook useForm
     const title = watch('title');
     const location = watch('location');
     const eventDateValue = watch('event_date');
@@ -83,55 +85,30 @@ export const CreateEvent: React.FC = () => {
     // Sugere o texto do termo automaticamente ao preencher título, local e data
     useEffect(() => {
         if (title && location && eventDateValue) {
+            // CORREÇÃO: Usar a função auxiliar para formatar a data corretamente.
+            const formattedDate = formatDateForDisplay(eventDateValue);
             setTermsContent(
                 gerarTextoTermoEvento(
                     title,
                     location,
-                    new Date(eventDateValue).toLocaleDateString('pt-BR')
+                    formattedDate
                 )
             );
         }
-    }, [title, location, eventDateValue, setTermsContent]);
+    }, [title, location, eventDateValue]);
 
-    const eventDate = watch('event_date')
-    const registrationEndDate = watch('registration_end_date')
-
-    // Validar se a data de fim das inscrições não é posterior ao evento
-    React.useEffect(() => {
-        if (eventDate && registrationEndDate) {
-            const eventDateTime = new Date(eventDate)
-            const regEndDateTime = new Date(registrationEndDate)
-
-            if (regEndDateTime >= eventDateTime) {
-                setError('A data de fim das inscrições deve ser anterior à data do evento')
-            } else {
-                // Limpar erro se as datas estão corretas
-                if (error === 'A data de fim das inscrições deve ser anterior à data do evento') {
-                    setError(null)
-                }
-            }
-        }
-    }, [eventDate, registrationEndDate, error])
-
-    // Função para gerenciar seleção de arquivo
     const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0]
         if (file) {
-            // Validar tipo de arquivo
             if (!file.type.startsWith('image/')) {
                 setError('Por favor, selecione apenas arquivos de imagem')
                 return
             }
-
-            // Validar tamanho do arquivo (máximo 5MB)
             if (file.size > 5 * 1024 * 1024) {
                 setError('A imagem deve ter no máximo 5MB')
                 return
             }
-
             setImageFile(file)
-
-            // Criar preview da imagem
             const reader = new FileReader()
             reader.onload = (e) => {
                 setImagePreview(e.target?.result as string)
@@ -141,58 +118,29 @@ export const CreateEvent: React.FC = () => {
         }
     }
 
-    // Função para remover imagem selecionada
     const removeImage = () => {
         setImageFile(null)
         setImagePreview(null)
     }
 
-    // Função para fazer upload da imagem para o Supabase Storage
     const uploadImage = async (file: File): Promise<string | null> => {
         try {
             setUploadingImage(true)
-            console.log('Iniciando upload da imagem:', file.name, 'Tamanho:', file.size)
-
-            // Gerar nome único para o arquivo
             const fileExt = file.name.split('.').pop()
             const fileName = `event-${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`
-            console.log('Nome do arquivo gerado:', fileName)
-
-            // Upload para o bucket 'event-images'
             const { data, error } = await supabase.storage
                 .from('event-images')
                 .upload(fileName, file, {
                     cacheControl: '3600',
                     upsert: false
                 })
-
-            if (error) {
-                console.error('Erro detalhado do upload:', error)
-                throw error
-            }
-
-            console.log('Upload realizado com sucesso:', data)
-
-            // Obter URL pública da imagem
+            if (error) throw error
             const { data: { publicUrl } } = supabase.storage
                 .from('event-images')
                 .getPublicUrl(data.path)
-
-            console.log('URL pública gerada:', publicUrl)
             return publicUrl
         } catch (error) {
             console.error('Erro ao fazer upload da imagem:', error)
-
-            // Erro mais específico baseado no tipo de erro
-            if (error && typeof error === 'object' && 'message' in error) {
-                const errorMessage = (error as { message: string }).message || ''
-                if (errorMessage.includes('row-level security policy')) {
-                    throw new Error('Erro de permissão. Verifique se você está logado e tem permissão para fazer upload.')
-                } else if (errorMessage.includes('Unauthorized')) {
-                    throw new Error('Não autorizado. Faça login novamente.')
-                }
-            }
-
             throw new Error('Erro ao fazer upload da imagem. Tente novamente.')
         } finally {
             setUploadingImage(false)
@@ -200,93 +148,43 @@ export const CreateEvent: React.FC = () => {
     }
 
     const onSubmit = async (data: EventFormData) => {
-        console.log('onSubmit chamado com dados:', data) // Debug
         setIsLoading(true)
         setError(null)
 
         try {
-            // Validar se é admin ou captain
             if (user?.role !== 'admin' && user?.role !== 'captain') {
-                setError('Você não tem permissão para criar eventos')
-                setIsLoading(false)
-                return
+                throw new Error('Você não tem permissão para criar eventos');
             }
 
-            // Validar e converter datas
-            const eventDate = new Date(data.event_date)
-            if (isNaN(eventDate.getTime())) {
-                setError('Data do evento inválida. Por favor, selecione uma data válida')
-                setIsLoading(false)
-                return
+            // --- CORREÇÃO NA VALIDAÇÃO DE DATAS ---
+            // Comparar as datas como strings no formato YYYY-MM-DD é seguro e evita erros de fuso horário.
+            const todayString = new Date().toISOString().split('T')[0];
+
+            if (data.event_date < todayString) {
+                throw new Error('A data do evento não pode ser no passado.');
             }
 
-            let registrationStartDate = null
-            let registrationEndDate = null
-
-            if (data.registration_start_date) {
-                registrationStartDate = new Date(data.registration_start_date)
-                if (isNaN(registrationStartDate.getTime())) {
-                    setError('Data de início das inscrições inválida. Por favor, selecione uma data válida')
-                    setIsLoading(false)
-                    return
-                }
+            if (data.registration_start_date && data.registration_end_date && data.registration_start_date >= data.registration_end_date) {
+                throw new Error('A data de início das inscrições deve ser anterior à data de fim.');
             }
 
-            if (data.registration_end_date) {
-                registrationEndDate = new Date(data.registration_end_date)
-                if (isNaN(registrationEndDate.getTime())) {
-                    setError('Data de fim das inscrições inválida. Por favor, selecione uma data válida')
-                    setIsLoading(false)
-                    return
-                }
+            if (data.registration_end_date && data.registration_end_date >= data.event_date) {
+                throw new Error('A data de fim das inscrições deve ser anterior à data do evento.');
             }
 
-            // Validar data mínima (uma semana a partir de hoje)
-            const today = new Date()
-            const minDate = new Date(today)
-            minDate.setDate(today.getDate() + 7)
-
-            if (eventDate < minDate) {
-                setError('O evento deve ser criado com pelo menos uma semana de antecedência')
-                setIsLoading(false)
-                return
-            }
-
-            // Validar se data de início das inscrições é antes da data de fim
-            if (registrationStartDate && registrationEndDate && registrationStartDate >= registrationEndDate) {
-                setError('A data de início das inscrições deve ser anterior à data de fim das inscrições')
-                setIsLoading(false)
-                return
-            }
-
-            // Validar se data de fim das inscrições é antes do evento
-            if (registrationEndDate && registrationEndDate >= eventDate) {
-                setError('A data de fim das inscrições deve ser anterior à data do evento')
-                setIsLoading(false)
-                return
-            }
-
-            // Validar horários
             if (data.start_time >= data.end_time) {
-                setError('O horário de início deve ser anterior ao horário de término')
-                setIsLoading(false)
-                return
+                throw new Error('O horário de início deve ser anterior ao horário de término.');
             }
 
-            // Validar número máximo de voluntários
             if (data.max_volunteers && (data.max_volunteers < 1 || data.max_volunteers > 1000)) {
-                setError('O número máximo de voluntários deve estar entre 1 e 1000')
-                setIsLoading(false)
-                return
+                throw new Error('O número máximo de voluntários deve estar entre 1 e 1000.');
             }
 
-            // Upload da imagem se foi selecionada
             let imageUrl = null
             if (imageFile) {
                 imageUrl = await uploadImage(imageFile)
             }
 
-            // Inserir evento no banco
             const { data: eventData, error: insertError } = await supabase
                 .from('events')
                 .insert([
@@ -294,12 +192,13 @@ export const CreateEvent: React.FC = () => {
                         title: data.title,
                         description: data.description,
                         location: data.location,
-                        event_date: eventDate.toISOString().split('T')[0], // Formato YYYY-MM-DD
+                        // Enviando a data como string, que é o correto para colunas do tipo 'date'
+                        event_date: data.event_date, 
                         start_time: data.start_time,
                         end_time: data.end_time,
                         max_volunteers: data.max_volunteers || 10,
-                        registration_start_date: registrationStartDate ? registrationStartDate.toISOString().split('T')[0] : null,
-                        registration_end_date: registrationEndDate ? registrationEndDate.toISOString().split('T')[0] : null,
+                        registration_start_date: data.registration_start_date || null,
+                        registration_end_date: data.registration_end_date || null,
                         category: data.category,
                         requirements: data.requirements || null,
                         image_url: imageUrl,
@@ -312,7 +211,6 @@ export const CreateEvent: React.FC = () => {
 
             if (insertError) throw insertError
 
-            // Após criar o evento, salvar os termos
             if (termsContent && eventData?.id) {
                 await supabase.from('event_terms').insert([
                     {
@@ -325,20 +223,20 @@ export const CreateEvent: React.FC = () => {
                 ])
             }
 
-            // NOVO: Registrar o criador como participante do evento
+            // Opcional: Registrar criador (verificar se a lógica de status 'registered' está correta para seu fluxo)
             if (eventData?.id && user?.id) {
                 await supabase.from('event_registrations').insert([
                     {
                         event_id: eventData.id,
                         user_id: user.id,
                         registration_type: 'direct',
-                        status: 'registered',
-                        created_at: new Date().toISOString()
+                        status: 'confirmed', // 'confirmed' pode ser mais apropriado para o criador
+                        terms_accepted: true,
+                        terms_accepted_at: new Date().toISOString(),
                     }
                 ])
             }
 
-            // Redirecionar para a página do evento
             navigate(`/events/${eventData.id}`)
         } catch (error: unknown) {
             console.error('Erro ao criar evento:', error)
@@ -351,40 +249,24 @@ export const CreateEvent: React.FC = () => {
 
     const categories = [
         { value: 'agenda-FS', label: 'Agenda FS' },
-        { value: 'corporativo', label: 'Corporativo' }        
+        { value: 'corporativo', label: 'Corporativo' }      
     ]
 
-    // Calcular data mínima para inscrições (mais flexível)
-    const getMinRegistrationDate = () => {
-        if (!eventDate) return new Date().toISOString().split('T')[0]
-
-        const event = new Date(eventDate)
-        const oneWeekBefore = new Date(event)
-        oneWeekBefore.setDate(oneWeekBefore.getDate() - 7) // 1 semana antes ao invés de 1 mês
-
-        const today = new Date()
-
-        // Retorna a data mais recente entre hoje e 1 semana antes do evento
-        return oneWeekBefore > today
-            ? oneWeekBefore.toISOString().split('T')[0]
-            : today.toISOString().split('T')[0]
-    }
-
     return (
-        <div className="max-w-4xl mx-auto space-y-8">
+        <div className="max-w-4xl mx-auto p-4 sm:p-6 lg:p-8 space-y-8">
             {/* Header */}
             <div className="flex items-center space-x-4">
                 <button
-                    onClick={() => navigate('/events')}
-                    className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                    title="Voltar para eventos"
+                    onClick={() => navigate(-1)} // Navega para a página anterior
+                    className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+                    title="Voltar"
                 >
                     <ArrowLeft className="w-5 h-5 text-gray-600" />
                 </button>
                 <div>
                     <h1 className="text-3xl font-bold text-gray-900">Criar Novo Evento</h1>
-                    <p className="text-gray-600 mt-2">
-                        Preencha as informações para criar um evento de voluntariado
+                    <p className="text-gray-600 mt-1">
+                        Preencha as informações para criar um evento de voluntariado.
                     </p>
                 </div>
             </div>
@@ -392,49 +274,32 @@ export const CreateEvent: React.FC = () => {
             {/* Error Alert */}
             {error && (
                 <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-                    <div className="flex items-center space-x-2">
-                        <AlertCircle className="w-5 h-5 text-red-600" />
-                        <p className="text-red-800">{error}</p>
+                    <div className="flex items-center space-x-3">
+                        <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0" />
+                        <p className="text-red-800 text-sm font-medium">{error}</p>
                     </div>
                 </div>
             )}
 
             {/* Form */}
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-8">
-                {/* Termos do Evento (FAQ) */}
-                <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-                    <div className="flex items-center space-x-3 mb-6">
-                        <FileText className="w-6 h-6 text-blue-600" />
-                        <h2 className="text-xl font-semibold text-gray-900">Termos do Evento (FAQ para voluntários)</h2>
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                            Termos do Evento (FAQ)
-                        </label>
-                        <textarea
-                            value={termsContent}
-                            onChange={e => setTermsContent(e.target.value)}
-                            rows={16}
-                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            placeholder="Termos do evento para voluntários"
-                            required
-                        />
-                        <p className="text-xs text-gray-500 mt-2">O texto é sugerido automaticamente, mas pode ser editado pelo administrador antes de salvar.</p>
-                    </div>
-                </div>
+
                 {/* Informações Básicas */}
-                <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-                    <div className="flex items-center space-x-3 mb-6">
-                        <FileText className="w-6 h-6 text-blue-600" />
-                        <h2 className="text-xl font-semibold text-gray-900">Informações Básicas</h2>
+                <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+                    <div className="p-6 border-b border-gray-200">
+                        <div className="flex items-center space-x-3">
+                            <FileText className="w-6 h-6 text-blue-600" />
+                            <h2 className="text-xl font-semibold text-gray-900">Informações Básicas</h2>
+                        </div>
                     </div>
 
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                        <div className="lg:col-span-2">
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <div className="p-6 space-y-6">
+                        <div>
+                            <label htmlFor="title" className="block text-sm font-medium text-gray-700 mb-2">
                                 Título do Evento *
                             </label>
                             <input
+                                id="title"
                                 {...register('title', { required: 'Título é obrigatório' })}
                                 type="text"
                                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -445,11 +310,12 @@ export const CreateEvent: React.FC = () => {
                             )}
                         </div>
 
-                        <div className="lg:col-span-2">
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                        <div>
+                            <label htmlFor="description" className="block text-sm font-medium text-gray-700 mb-2">
                                 Descrição *
                             </label>
                             <textarea
+                                id="description"
                                 {...register('description', { required: 'Descrição é obrigatória' })}
                                 rows={4}
                                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -460,133 +326,64 @@ export const CreateEvent: React.FC = () => {
                             )}
                         </div>
 
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                                Local *
-                            </label>
-                            <div className="relative">
-                                <MapPin className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
-                                <input
-                                    {...register('location', { required: 'Localização é obrigatória' })}
-                                    type="text"
-                                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                    placeholder="Ex: Parque Central, Rua das Flores, 123"
-                                />
-                            </div>
-                            {errors.location && (
-                                <p className="mt-1 text-sm text-red-600">{errors.location.message}</p>
-                            )}
-                        </div>
-
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                                Categoria *
-                            </label>
-                            <select
-                                {...register('category', { required: 'Categoria é obrigatória' })}
-                                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            >
-                                {categories.map((category) => (
-                                    <option key={category.value} value={category.value}>
-                                        {category.label}
-                                    </option>
-                                ))}
-                            </select>
-                            {errors.category && (
-                                <p className="mt-1 text-sm text-red-600">{errors.category.message}</p>
-                            )}
-                        </div>
-
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                                Imagem do Evento (opcional)
-                            </label>
-
-                            {!imagePreview ? (
-                                <div>
-                                    <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-gray-400 transition-colors">
-                                        <input
-                                            type="file"
-                                            accept="image/*"
-                                            onChange={handleFileSelect}
-                                            className="hidden"
-                                            id="image-upload"
-                                        />
-                                        <label
-                                            htmlFor="image-upload"
-                                            className="cursor-pointer flex flex-col items-center space-y-2"
-                                        >
-                                            <Upload className="w-8 h-8 text-gray-400" />
-                                            <span className="text-sm text-gray-600">
-                                                Clique para selecionar uma imagem
-                                            </span>
-                                            <span className="text-xs text-gray-500">
-                                                PNG, JPG, GIF até 5MB
-                                            </span>
-                                        </label>
-                                    </div>
-                                </div>
-                            ) : (
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                            <div>
+                                <label htmlFor="location" className="block text-sm font-medium text-gray-700 mb-2">
+                                    Local *
+                                </label>
                                 <div className="relative">
-                                    <img
-                                        src={imagePreview}
-                                        alt="Preview da imagem"
-                                        className="w-full h-48 object-cover rounded-lg border border-gray-300"
+                                    <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                                    <input
+                                        id="location"
+                                        {...register('location', { required: 'Localização é obrigatória' })}
+                                        type="text"
+                                        className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                        placeholder="Ex: Parque Central, Rua das Flores, 123"
                                     />
-                                    <button
-                                        type="button"
-                                        onClick={removeImage}
-                                        className="absolute top-2 right-2 p-1 bg-red-600 text-white rounded-full hover:bg-red-700 transition-colors"
-                                        title="Remover imagem"
-                                    >
-                                        <X className="w-4 h-4" />
-                                    </button>
                                 </div>
-                            )}
-
-                            {uploadingImage && (
-                                <div className="mt-2 text-sm text-blue-600 flex items-center">
-                                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2"></div>
-                                    Fazendo upload da imagem...
-                                </div>
-                            )}
-                        </div>
-
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                                Máximo de Voluntários *
-                            </label>
-                            <div className="relative">
-                                <Users className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
-                                <input
-                                    {...register('max_volunteers', { valueAsNumber: true })}
-                                    type="number"
-                                    min="1"
-                                    max="1000"
-                                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                    placeholder="10"
-                                />
+                                {errors.location && (
+                                    <p className="mt-1 text-sm text-red-600">{errors.location.message}</p>
+                                )}
                             </div>
-                            {errors.max_volunteers && (
-                                <p className="mt-1 text-sm text-red-600">{errors.max_volunteers.message}</p>
-                            )}
+
+                            <div>
+                                <label htmlFor="category" className="block text-sm font-medium text-gray-700 mb-2">
+                                    Categoria *
+                                </label>
+                                <select
+                                    id="category"
+                                    {...register('category', { required: 'Categoria é obrigatória' })}
+                                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                >
+                                    {categories.map((category) => (
+                                        <option key={category.value} value={category.value}>
+                                            {category.label}
+                                        </option>
+                                    ))}
+                                </select>
+                                {errors.category && (
+                                    <p className="mt-1 text-sm text-red-600">{errors.category.message}</p>
+                                )}
+                            </div>
                         </div>
                     </div>
                 </div>
 
                 {/* Data e Horário */}
-                <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-                    <div className="flex items-center space-x-3 mb-6">
-                        <Calendar className="w-6 h-6 text-green-600" />
-                        <h2 className="text-xl font-semibold text-gray-900">Data e Horário</h2>
+                <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+                    <div className="p-6 border-b border-gray-200">
+                        <div className="flex items-center space-x-3">
+                            <Calendar className="w-6 h-6 text-green-600" />
+                            <h2 className="text-xl font-semibold text-gray-900">Data e Horário</h2>
+                        </div>
                     </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div className="p-6 grid grid-cols-1 md:grid-cols-3 gap-6">
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                            <label htmlFor="event_date" className="block text-sm font-medium text-gray-700 mb-2">
                                 Data do Evento *
                             </label>
                             <input
+                                id="event_date"
                                 {...register('event_date', { required: 'Data do evento é obrigatória' })}
                                 type="date"
                                 min={new Date().toISOString().split('T')[0]}
@@ -598,12 +395,13 @@ export const CreateEvent: React.FC = () => {
                         </div>
 
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                            <label htmlFor="start_time" className="block text-sm font-medium text-gray-700 mb-2">
                                 Hora de Início *
                             </label>
                             <div className="relative">
-                                <Clock className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
+                                <Clock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
                                 <input
+                                    id="start_time"
                                     {...register('start_time', { required: 'Horário de início é obrigatório' })}
                                     type="time"
                                     className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -615,12 +413,13 @@ export const CreateEvent: React.FC = () => {
                         </div>
 
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                            <label htmlFor="end_time" className="block text-sm font-medium text-gray-700 mb-2">
                                 Hora de Término *
                             </label>
                             <div className="relative">
-                                <Clock className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
+                                <Clock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
                                 <input
+                                    id="end_time"
                                     {...register('end_time', { required: 'Horário de término é obrigatório' })}
                                     type="time"
                                     className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -633,49 +432,42 @@ export const CreateEvent: React.FC = () => {
                     </div>
                 </div>
 
-                {/* Período de Inscrições */}
-                <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-                    <div className="flex items-center space-x-3 mb-6">
-                        <Settings className="w-6 h-6 text-purple-600" />
-                        <h2 className="text-xl font-semibold text-gray-900">Período de Inscrições</h2>
-                    </div>
-
-                    <div className="space-y-4">
-                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                            <div className="flex items-center space-x-2">
-                                <AlertCircle className="w-5 h-5 text-blue-600" />
-                                <p className="text-blue-800 text-sm">
-                                    <strong>Dica:</strong> As inscrições devem terminar antes da data do evento. Recomendamos pelo menos 1 semana de antecedência.
-                                </p>
-                            </div>
+                {/* Período de Inscrições e Vagas */}
+                <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+                    <div className="p-6 border-b border-gray-200">
+                        <div className="flex items-center space-x-3">
+                            <Settings className="w-6 h-6 text-purple-600" />
+                            <h2 className="text-xl font-semibold text-gray-900">Inscrições e Vagas</h2>
                         </div>
-
+                    </div>
+                    <div className="p-6 space-y-6">
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                <label htmlFor="registration_start_date" className="block text-sm font-medium text-gray-700 mb-2">
                                     Início das Inscrições *
                                 </label>
                                 <input
-                                    {...register('registration_start_date')}
+                                    id="registration_start_date"
+                                    {...register('registration_start_date', { required: 'Data de início é obrigatória' })}
                                     type="date"
                                     min={new Date().toISOString().split('T')[0]}
-                                    max={getMinRegistrationDate()}
+                                    max={eventDateValue ? eventDateValue : undefined}
                                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                                 />
                                 {errors.registration_start_date && (
                                     <p className="mt-1 text-sm text-red-600">{errors.registration_start_date.message}</p>
                                 )}
                             </div>
-
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                <label htmlFor="registration_end_date" className="block text-sm font-medium text-gray-700 mb-2">
                                     Fim das Inscrições *
                                 </label>
                                 <input
-                                    {...register('registration_end_date')}
+                                    id="registration_end_date"
+                                    {...register('registration_end_date', { required: 'Data de fim é obrigatória' })}
                                     type="date"
-                                    min={new Date().toISOString().split('T')[0]}
-                                    max={eventDate ? new Date(eventDate).toISOString().split('T')[0] : undefined}
+                                    min={watch('registration_start_date') || new Date().toISOString().split('T')[0]}
+                                    max={eventDateValue ? eventDateValue : undefined}
                                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                                 />
                                 {errors.registration_end_date && (
@@ -683,37 +475,122 @@ export const CreateEvent: React.FC = () => {
                                 )}
                             </div>
                         </div>
+                        <div>
+                            <label htmlFor="max_volunteers" className="block text-sm font-medium text-gray-700 mb-2">
+                                Máximo de Voluntários *
+                            </label>
+                            <div className="relative">
+                                <Users className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                                <input
+                                    id="max_volunteers"
+                                    {...register('max_volunteers', { valueAsNumber: true, required: "Número de vagas é obrigatório", min: 1, max: 1000 })}
+                                    type="number"
+                                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    placeholder="10"
+                                />
+                            </div>
+                            {errors.max_volunteers && (
+                                <p className="mt-1 text-sm text-red-600">{errors.max_volunteers.message}</p>
+                            )}
+                        </div>
                     </div>
                 </div>
 
-                {/* Requisitos */}
-                <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-                    <div className="flex items-center space-x-3 mb-6">
-                        <FileText className="w-6 h-6 text-orange-600" />
-                        <h2 className="text-xl font-semibold text-gray-900">Requisitos (Opcional)</h2>
+                {/* Imagem e Requisitos */}
+                <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+                    <div className="p-6 border-b border-gray-200">
+                        <div className="flex items-center space-x-3">
+                            <Upload className="w-6 h-6 text-orange-600" />
+                            <h2 className="text-xl font-semibold text-gray-900">Detalhes Adicionais</h2>
+                        </div>
                     </div>
+                    <div className="p-6 space-y-6">
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                                Imagem do Evento (opcional)
+                            </label>
+                            {!imagePreview ? (
+                                <label htmlFor="image-upload" className="cursor-pointer border-2 border-dashed border-gray-300 rounded-lg p-6 text-center flex flex-col items-center justify-center hover:border-blue-500 transition-colors">
+                                    <Upload className="w-8 h-8 text-gray-400 mb-2" />
+                                    <span className="text-sm font-semibold text-blue-600">Clique para fazer upload</span>
+                                    <span className="text-xs text-gray-500 mt-1">PNG, JPG, GIF até 5MB</span>
+                                    <input
+                                        type="file"
+                                        accept="image/*"
+                                        onChange={handleFileSelect}
+                                        className="hidden"
+                                        id="image-upload"
+                                    />
+                                </label>
+                            ) : (
+                                <div className="relative">
+                                    <img
+                                        src={imagePreview}
+                                        alt="Preview da imagem"
+                                        className="w-full h-48 object-cover rounded-lg border border-gray-300"
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={removeImage}
+                                        className="absolute top-2 right-2 p-1.5 bg-black bg-opacity-50 text-white rounded-full hover:bg-opacity-75 transition-colors"
+                                        title="Remover imagem"
+                                    >
+                                        <X className="w-4 h-4" />
+                                    </button>
+                                </div>
+                            )}
+                            {uploadingImage && (
+                                <div className="mt-2 text-sm text-blue-600 flex items-center">
+                                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2"></div>
+                                    Fazendo upload da imagem...
+                                </div>
+                            )}
+                        </div>
+                        <div>
+                            <label htmlFor="requirements" className="block text-sm font-medium text-gray-700 mb-2">
+                                Requisitos para Participação (opcional)
+                            </label>
+                            <textarea
+                                id="requirements"
+                                {...register('requirements')}
+                                rows={3}
+                                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                placeholder="Ex: Disponibilidade para trabalhar ao ar livre, trazer água e protetor solar..."
+                            />
+                        </div>
+                    </div>
+                </div>
 
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                            Requisitos para Participação
+                {/* Termos do Evento (FAQ) */}
+                <div className="bg-white rounded-lg shadow-sm border border-gray-200">
+                    <div className="p-6 border-b border-gray-200">
+                        <div className="flex items-center space-x-3">
+                            <FileText className="w-6 h-6 text-gray-600" />
+                            <h2 className="text-xl font-semibold text-gray-900">Termos do Evento (FAQ)</h2>
+                        </div>
+                    </div>
+                    <div className="p-6">
+                        <label htmlFor="terms" className="block text-sm font-medium text-gray-700 mb-2">
+                            Conteúdo do FAQ para voluntários
                         </label>
                         <textarea
-                            {...register('requirements')}
-                            rows={3}
+                            id="terms"
+                            value={termsContent}
+                            onChange={e => setTermsContent(e.target.value)}
+                            rows={16}
                             className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            placeholder="Ex: Disponibilidade para trabalhar ao ar livre, trazer água e protetor solar..."
+                            placeholder="O texto do FAQ é gerado automaticamente ao preencher os campos acima, mas pode ser editado."
+                            required
                         />
-                        {errors.requirements && (
-                            <p className="mt-1 text-sm text-red-600">{errors.requirements.message}</p>
-                        )}
+                        <p className="text-xs text-gray-500 mt-2">O texto é sugerido automaticamente, mas pode ser editado pelo administrador antes de salvar.</p>
                     </div>
                 </div>
 
                 {/* Botões de Ação */}
-                <div className="flex items-center justify-end space-x-4 pt-6 border-t border-gray-200">
+                <div className="flex items-center justify-end space-x-4 pt-6 border-t border-gray-200 mt-8">
                     <button
                         type="button"
-                        onClick={() => navigate('/events')}
+                        onClick={() => navigate(-1)}
                         className="px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
                     >
                         Cancelar

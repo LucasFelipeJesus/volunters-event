@@ -11,7 +11,6 @@ import {
   Plus,
   ArrowRight,
   CheckCircle,
-
 } from 'lucide-react'
 
 // Tipo para registros de eventos
@@ -56,6 +55,20 @@ export const Dashboard: React.FC = () => {
     totalTeams: 0,
     activeTeams: 0
   })
+
+  // --- FUNÇÃO DE AJUDA PARA FORMATAR A DATA ---
+  // Esta função evita erros de fuso horário tratando a data como texto.
+  const formatDateDisplay = (dateString?: string) => {
+    if (!dateString) {
+      return 'Data inválida';
+    }
+    // A data vem como "YYYY-MM-DD" ou "YYYY-MM-DDTHH:mm:ss..."
+    // Pegamos apenas a parte da data e dividimos
+    const [year, month, day] = dateString.split('T')[0].split('-');
+
+    // Retornamos no formato brasileiro
+    return `${day}/${month}/${year}`;
+  };
 
   const fetchDashboardData = useCallback(async () => {
     try {
@@ -104,7 +117,6 @@ export const Dashboard: React.FC = () => {
           .select('id, status')
 
         const totalTeams = teamsData?.length || 0
-        // Considera como ativa apenas se status === 'active' (conforme tipagem do banco)
         const activeTeams = teamsData?.filter(team => team.status === 'complete').length || 0
         setTeamStats({
           totalTeams,
@@ -395,7 +407,8 @@ export const Dashboard: React.FC = () => {
                         <div className="flex items-center space-x-4 mt-2 text-sm text-gray-600">
                           <div className="flex items-center space-x-1">
                             <Calendar className="w-4 h-4" />
-                            <span>{new Date(event.event_date).toLocaleDateString('pt-BR')}</span>
+                            {/* --- DATA CORRIGIDA AQUI --- */}
+                            <span>{formatDateDisplay(event.event_date)}</span>
                           </div>
                           <div className="flex items-center space-x-1">
                             <MapPin className="w-4 h-4" />
@@ -477,7 +490,8 @@ export const Dashboard: React.FC = () => {
                               <div className="flex items-center space-x-4 mt-2 text-sm text-gray-600">
                                 <div className="flex items-center space-x-1">
                                   <Calendar className="w-4 h-4" />
-                                  <span>{new Date(participation.event?.event_date || '').toLocaleDateString('pt-BR')}</span>
+                                  {/* --- DATA CORRIGIDA AQUI --- */}
+                                  <span>{formatDateDisplay(participation.event?.event_date)}</span>
                                 </div>
                                 <div className="flex items-center space-x-1">
                                   <MapPin className="w-4 h-4" />

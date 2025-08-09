@@ -458,6 +458,12 @@ export const EventDetails: React.FC = () => {
     }
 
     const formatDate = (dateString: string) => {
+        // Se vier no formato 'YYYY-MM-DD', formatar manualmente para evitar problemas de timezone
+        if (/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
+            const [ano, mes, dia] = dateString.split('-')
+            return `${dia}/${mes}/${ano}`
+        }
+        // Se vier outro formato, tenta converter normalmente
         return new Date(dateString).toLocaleDateString('pt-BR', {
             day: '2-digit',
             month: '2-digit',

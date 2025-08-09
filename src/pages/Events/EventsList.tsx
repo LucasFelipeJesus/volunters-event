@@ -10,13 +10,12 @@ import {
   Plus,
   Clock,
   Tag,
-  TrendingUp,
-  CheckCircle,
-  AlertCircle
+  TrendingUp, // Agora será usado
+  CheckCircle,  // Agora será usado
+  AlertCircle  // Agora será usado
 } from 'lucide-react'
 
 // --- FUNÇÃO AUXILIAR PARA CONTAR VOLUNTÁRIOS ---
-// Centraliza a lógica de contagem para ser reutilizada
 const getEventVolunteerCount = (event: Event): { current: number; max: number } => {
   const confirmedRegistrations = event.event_registrations?.filter(
     (reg: EventRegistration) => reg.status === 'confirmed'
@@ -28,6 +27,12 @@ const getEventVolunteerCount = (event: Event): { current: number; max: number } 
   };
 };
 
+// --- FUNÇÃO CORRIGIDA PARA FORMATAR A DATA ---
+const formatDateDisplay = (dateString?: string) => {
+  if (!dateString) return 'Data inválida';
+  const [year, month, day] = dateString.split('T')[0].split('-');
+  return `${day}/${month}/${year}`;
+};
 
 export const EventsList: React.FC = () => {
   const { user } = useAuth()
@@ -37,12 +42,10 @@ export const EventsList: React.FC = () => {
   const [filterStatus, setFilterStatus] = useState<string>('all')
   const [filterCategory, setFilterCategory] = useState<string>('all')
 
-  // 1. useEffect foi simplificado para uma única chamada de busca de dados
   useEffect(() => {
     fetchEvents()
   }, [])
 
-  // 2. Apenas uma função para buscar todos os dados necessários
   const fetchEvents = async () => {
     setLoading(true)
     try {
@@ -65,8 +68,6 @@ export const EventsList: React.FC = () => {
     }
   }
 
-  // 3. As estatísticas são calculadas com useMemo a partir dos eventos já carregados
-  // Isso evita chamadas extras à API e é mais performático
   const stats = useMemo(() => {
     if (events.length === 0) {
       return {
@@ -79,15 +80,17 @@ export const EventsList: React.FC = () => {
       };
     }
 
+    const todayString = new Date().toISOString().split('T')[0];
+
     const totalEvents = events.length
-    const activeEvents = events.filter(e => e.status === 'published' && new Date(e.event_date) >= new Date()).length
-    const completedEvents = events.filter(e => e.status === 'completed' || new Date(e.event_date) < new Date()).length
+    const activeEvents = events.filter(e => e.status === 'published' && e.event_date >= todayString).length
+    const completedEvents = events.filter(e => e.status === 'completed' || e.event_date < todayString).length
 
     let totalVolunteers = 0
     let totalMaxVolunteers = 0
 
     events.forEach(event => {
-      const count = getEventVolunteerCount(event); // Usando a função auxiliar
+      const count = getEventVolunteerCount(event);
       totalVolunteers += count.current;
       totalMaxVolunteers += count.max;
     });
@@ -103,12 +106,11 @@ export const EventsList: React.FC = () => {
       availableSpots,
       occupancyRate
     }
-  }, [events]) // O cálculo só é refeito quando a lista de eventos muda
+  }, [events])
 
-  // Filtragem de eventos para exibição
   const filteredEvents = events.filter(event => {
     const matchesSearch = event.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      event.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (event.description && event.description.toLowerCase().includes(searchTerm.toLowerCase())) ||
       event.location.toLowerCase().includes(searchTerm.toLowerCase())
     
     const matchesStatus = filterStatus === 'all' || event.status === filterStatus
@@ -117,20 +119,11 @@ export const EventsList: React.FC = () => {
     return matchesSearch && matchesStatus && matchesCategory
   })
 
-  // Funções de formatação
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('pt-BR', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric'
-    })
-  }
-
   const formatTime = (timeString: string) => {
+    if (!timeString) return '';
     return timeString.slice(0, 5)
   }
 
-  // Função para verificar se o evento está lotado, agora usando a função auxiliar
   const isEventFull = (event: Event) => {
     const count = getEventVolunteerCount(event);
     return count.current >= count.max;
@@ -145,19 +138,19 @@ export const EventsList: React.FC = () => {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 p-4 sm:p-6 lg:p-8">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Eventos</h1>
-          <p className="text-gray-600 mt-2">
-            Encontre oportunidades de voluntariado próximas a você
+          <p className="text-gray-600 mt-1">
+            Encontre e gerencie oportunidades de voluntariado.
           </p>
         </div>
         {user?.role === 'captain' || user?.role === 'admin' ? (
           <Link
             to="/events/create"
-            className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors w-full sm:w-auto justify-center"
           >
             <Plus className="w-5 h-5" />
             <span>Criar Evento</span>
@@ -165,83 +158,67 @@ export const EventsList: React.FC = () => {
         ) : null}
       </div>
 
-      {/* Panorama Geral - Statistics Dashboard (agora usando os dados de 'useMemo') */}
+      {/* Panorama Geral - Statistics Dashboard */}
       <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
         <h2 className="text-xl font-semibold text-gray-900 mb-6">Panorama Geral</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-6">
+        {/* --- JSX CORRIGIDO COM ÍCONES RESTAURADOS --- */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-6">
           {/* Total de Eventos */}
           <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
             <div className="flex items-center space-x-3">
-              <div className="bg-blue-100 p-2 rounded-lg">
-                <Calendar className="w-6 h-6 text-blue-600" />
-              </div>
+              <div className="bg-blue-100 p-2 rounded-lg"><Calendar className="w-6 h-6 text-blue-600" /></div>
               <div>
-                <p className="text-sm font-medium text-blue-600">Total de Eventos</p>
+                <p className="text-sm font-medium text-blue-600">Total</p>
                 <p className="text-2xl font-bold text-blue-900">{stats.totalEvents}</p>
               </div>
             </div>
           </div>
-
           {/* Eventos Ativos */}
           <div className="bg-green-50 rounded-lg p-4 border border-green-200">
             <div className="flex items-center space-x-3">
-              <div className="bg-green-100 p-2 rounded-lg">
-                <CheckCircle className="w-6 h-6 text-green-600" />
-              </div>
+              <div className="bg-green-100 p-2 rounded-lg"><CheckCircle className="w-6 h-6 text-green-600" /></div>
               <div>
-                <p className="text-sm font-medium text-green-600">Eventos Ativos</p>
+                <p className="text-sm font-medium text-green-600">Ativos</p>
                 <p className="text-2xl font-bold text-green-900">{stats.activeEvents}</p>
               </div>
             </div>
           </div>
-
           {/* Eventos Concluídos */}
-          <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+          <div className="bg-gray-100 rounded-lg p-4 border border-gray-200">
             <div className="flex items-center space-x-3">
-              <div className="bg-gray-100 p-2 rounded-lg">
-                <AlertCircle className="w-6 h-6 text-gray-600" />
-              </div>
+              <div className="bg-gray-200 p-2 rounded-lg"><AlertCircle className="w-6 h-6 text-gray-600" /></div>
               <div>
                 <p className="text-sm font-medium text-gray-600">Concluídos</p>
                 <p className="text-2xl font-bold text-gray-900">{stats.completedEvents}</p>
               </div>
             </div>
           </div>
-
           {/* Total de Voluntários */}
           <div className="bg-purple-50 rounded-lg p-4 border border-purple-200">
             <div className="flex items-center space-x-3">
-              <div className="bg-purple-100 p-2 rounded-lg">
-                <Users className="w-6 h-6 text-purple-600" />
-              </div>
+              <div className="bg-purple-100 p-2 rounded-lg"><Users className="w-6 h-6 text-purple-600" /></div>
               <div>
-                <p className="text-sm font-medium text-purple-600">Voluntários Alocados</p>
+                <p className="text-sm font-medium text-purple-600">Alocados</p>
                 <p className="text-2xl font-bold text-purple-900">{stats.totalVolunteers}</p>
               </div>
             </div>
           </div>
-
           {/* Vagas Disponíveis */}
           <div className="bg-yellow-50 rounded-lg p-4 border border-yellow-200">
             <div className="flex items-center space-x-3">
-              <div className="bg-yellow-100 p-2 rounded-lg">
-                <TrendingUp className="w-6 h-6 text-yellow-600" />
-              </div>
+              <div className="bg-yellow-100 p-2 rounded-lg"><Users className="w-6 h-6 text-yellow-600" /></div>
               <div>
-                <p className="text-sm font-medium text-yellow-600">Vagas Disponíveis</p>
+                <p className="text-sm font-medium text-yellow-600">Vagas</p>
                 <p className="text-2xl font-bold text-yellow-900">{stats.availableSpots}</p>
               </div>
             </div>
           </div>
-
           {/* Taxa de Ocupação */}
           <div className="bg-indigo-50 rounded-lg p-4 border border-indigo-200">
             <div className="flex items-center space-x-3">
-              <div className="bg-indigo-100 p-2 rounded-lg">
-                <TrendingUp className="w-6 h-6 text-indigo-600" />
-              </div>
+              <div className="bg-indigo-100 p-2 rounded-lg"><TrendingUp className="w-6 h-6 text-indigo-600" /></div>
               <div>
-                <p className="text-sm font-medium text-indigo-600">Taxa de Ocupação</p>
+                <p className="text-sm font-medium text-indigo-600">Ocupação</p>
                 <p className="text-2xl font-bold text-indigo-900">{stats.occupancyRate}%</p>
               </div>
             </div>
@@ -254,17 +231,17 @@ export const EventsList: React.FC = () => {
         <div className="flex flex-col lg:flex-row gap-4">
           <div className="flex-1">
             <div className="relative">
-              <Search className="absolute left-3 top-3 h-5 w-5 text-gray-400" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
               <input
                 type="text"
-                placeholder="Pesquisar eventos..."
+                placeholder="Pesquisar por título, local ou descrição..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />
             </div>
           </div>
-          <div className="flex space-x-4">
+          <div className="flex flex-col sm:flex-row gap-4">
             <select
               value={filterStatus}
               onChange={(e) => setFilterStatus(e.target.value)}
@@ -283,12 +260,8 @@ export const EventsList: React.FC = () => {
               aria-label="Filtrar por categoria"
             >
               <option value="all">Todas as Categorias</option>
-              <option value="education">Educação</option>
-              <option value="health">Saúde</option>
-              <option value="environment">Meio Ambiente</option>
-              <option value="social">Social</option>
-              <option value="culture">Cultura</option>
-              <option value="sports">Esportes</option>
+              <option value="agenda-FS">Agenda FS</option>
+              <option value="corporativo">Corporativo</option>
             </select>
           </div>
         </div>
@@ -296,7 +269,7 @@ export const EventsList: React.FC = () => {
 
       {/* Events Grid */}
       {filteredEvents.length === 0 ? (
-        <div className="text-center py-12">
+        <div className="text-center py-16 bg-white rounded-lg border border-gray-200">
           <Calendar className="mx-auto h-12 w-12 text-gray-400 mb-4" />
           <h3 className="text-lg font-medium text-gray-900 mb-2">Nenhum evento encontrado</h3>
           <p className="text-gray-500">Tente ajustar os filtros ou criar um novo evento.</p>
@@ -304,59 +277,59 @@ export const EventsList: React.FC = () => {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredEvents.map((event) => (
-            <div key={event.id} className="bg-white rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow">
+            <div key={event.id} className="bg-white rounded-lg shadow-sm border border-gray-200 flex flex-col hover:shadow-lg transition-shadow duration-300">
               {event.image_url && (
-                <img
-                  src={event.image_url}
-                  alt={event.title}
-                  className="w-full h-48 object-cover rounded-t-lg"
-                />
+                <Link to={`/events/${event.id}`}>
+                  <img
+                    src={event.image_url}
+                    alt={event.title}
+                    className="w-full h-48 object-cover rounded-t-lg"
+                  />
+                </Link>
               )}
-              <div className="p-6">
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex-1">
-                    <h3 className="text-lg font-semibold text-gray-900 mb-2">{event.title}</h3>
+              <div className="p-6 flex flex-col flex-grow">
+                <div className="flex-grow">
+                  <div className="flex items-start justify-between mb-2">
                     {event.category && (
-                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 mb-2">
-                        <Tag className="w-3 h-3 mr-1" />
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                        <Tag className="w-3 h-3 mr-1.5" />
                         {event.category}
                       </span>
                     )}
+                    {isEventFull(event) && (
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                        Lotado
+                      </span>
+                    )}
                   </div>
-                  {isEventFull(event) && (
-                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
-                      Lotado
-                    </span>
-                  )}
+                  <h3 className="text-lg font-semibold text-gray-900 mb-2 line-clamp-2">{event.title}</h3>
+                  <p className="text-gray-600 text-sm mb-4 line-clamp-3">{event.description}</p>
                 </div>
 
-                <p className="text-gray-600 text-sm mb-4 line-clamp-3">{event.description}</p>
-
-                <div className="space-y-2 mb-4">
-                  <div className="flex items-center space-x-2 text-sm text-gray-600">
-                    <Calendar className="w-4 h-4 text-gray-400" />
-                    <span>{formatDate(event.event_date)}</span>
+                <div className="space-y-3 mb-4 text-sm">
+                  <div className="flex items-center space-x-2 text-gray-700">
+                    <Calendar className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                    <span className="font-medium">{formatDateDisplay(event.event_date)}</span>
                   </div>
-                  <div className="flex items-center space-x-2 text-sm text-gray-600">
-                    <Clock className="w-4 h-4 text-gray-400" />
+                  <div className="flex items-center space-x-2 text-gray-700">
+                    <Clock className="w-4 h-4 text-gray-400 flex-shrink-0" />
                     <span>{formatTime(event.start_time)} - {formatTime(event.end_time)}</span>
                   </div>
-                  <div className="flex items-center space-x-2 text-sm text-gray-600">
-                    <MapPin className="w-4 h-4 text-gray-400" />
+                  <div className="flex items-center space-x-2 text-gray-700">
+                    <MapPin className="w-4 h-4 text-gray-400 flex-shrink-0" />
                     <span>{event.location}</span>
                   </div>
-                  <div className="flex items-center space-x-2 text-sm text-gray-600">
-                    <Users className="w-4 h-4 text-gray-400" />
-                    {/* Contagem de voluntários no card, agora mais limpa */}
+                  <div className="flex items-center space-x-2 text-gray-700">
+                    <Users className="w-4 h-4 text-gray-400 flex-shrink-0" />
                     <span>
-                      {`${getEventVolunteerCount(event).current}/${getEventVolunteerCount(event).max} voluntários`}
+                      {`${getEventVolunteerCount(event).current} de ${getEventVolunteerCount(event).max} voluntários`}
                     </span>
                   </div>
                 </div>
 
-                <div className="flex items-center justify-between pt-4 border-t border-gray-200">
-                  <div className="text-sm text-gray-500">
-                    Por {event.admin?.full_name}
+                <div className="flex items-center justify-between pt-4 border-t border-gray-100 mt-auto">
+                  <div className="text-xs text-gray-500">
+                    Por {event.admin?.full_name || 'Admin'}
                   </div>
                   <Link
                     to={`/events/${event.id}`}
