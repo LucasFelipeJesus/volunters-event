@@ -309,6 +309,20 @@ export const EventDetails: React.FC = () => {
 
             if (updateError) throw updateError
 
+            // Se status foi alterado para 'completed', inativar todos os membros das equipes do evento
+            if (editData.status === 'completed' && event?.teams?.length) {
+                const teamIds = event.teams.map(t => t.id)
+                // Atualiza todos os membros ativos dessas equipes para 'inactive' e registra saída
+                const { error: membersError } = await supabase
+                    .from('team_members')
+                    .update({ status: 'inactive', left_at: new Date().toISOString() })
+                    .in('team_id', teamIds)
+                    .eq('status', 'active')
+                if (membersError) {
+                    console.error('Erro ao desalocar membros das equipes:', membersError)
+                }
+            }
+
             setSuccess('Evento atualizado com sucesso!')
             setIsEditing(false)
             setImageFile(null)
@@ -553,6 +567,12 @@ export const EventDetails: React.FC = () => {
                             <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(event.status)}`}>
                                 {getStatusText(event.status)}
                             </span>
+                            {event.status === 'completed' && (
+                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-gray-200 text-gray-700 ml-2">
+                                    <CheckCircle className="w-3 h-3 mr-1.5 text-gray-600" />
+                                    Finalizado
+                                </span>
+                            )}
                             {event.category && (
                                 <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
                                     <Tag className="w-3 h-3 mr-1" />
@@ -563,9 +583,10 @@ export const EventDetails: React.FC = () => {
                     </div>
                 </div>
 
-                {canEdit && (
+                {canEdit && event.status !== 'completed' && (
                     <div className="flex items-center space-x-2">
-                        {!isEditing ? (
+                        {/* Botões de edição e exclusão só aparecem se evento não estiver finalizado */}
+                        {event.status !== 'completed' && (!isEditing ? (
                             <>
                                 <Link
                                     to={`/events/${id}/terms`}
@@ -609,9 +630,9 @@ export const EventDetails: React.FC = () => {
                                     <span>Cancelar</span>
                                 </button>
                             </div>
-                        )}
+                        ))}
 
-                        {user?.role === 'admin' && (
+                        {user?.role === 'admin' && event.status !== 'completed' && (
                             <button
                                 onClick={handleDeleteEvent}
                                 className="flex items-center space-x-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
@@ -908,84 +929,53 @@ export const EventDetails: React.FC = () => {
                         <div className="flex items-center justify-between mb-6">
                             <h2 className="text-xl font-semibold text-gray-900">Voluntários e Equipes</h2>
                         </div>
-
                         {/* Inscrições Diretas */}
                         {event.event_registrations && event.event_registrations.length > 0 && (
                             <div className="mb-8">
                                 <div className="flex items-center justify-between mb-4">
                                     <h3 className="text-lg font-medium text-gray-900 flex items-center">
                                         <UserPlus className="w-5 h-5 mr-2" />
-                                        Voluntários Inscritos ({event.event_registrations.filter(reg =>
-                                            reg.status === 'confirmed' || reg.status === 'pending'
-                                        ).length})
+                                        Voluntários Inscritos ({event.event_registrations.filter(reg => reg.status === 'confirmed' || reg.status === 'pending').length})
                                     </h3>
                                 </div>
-
                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                    {event.event_registrations
-                                        .filter(reg => reg.status === 'confirmed' || reg.status === 'pending')
-                                        .map((registration) => (
-                                            <div key={registration.id} className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-                                                <div className="flex items-center justify-between">
-                                                    <div className="flex-1">
-                                                        <h4 className="font-medium text-gray-900">
-                                                            {registration.user?.full_name}
-                                                        </h4>
-                                                        <p className="text-sm text-gray-600">{registration.user?.email}</p>
-                                                        <div className="flex items-center mt-2">
-                                                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${registration.status === 'confirmed'
-                                                                ? 'bg-green-100 text-green-800'
-                                                                : 'bg-yellow-100 text-yellow-800'
-                                                                }`}>
-                                                                {registration.status === 'confirmed' ? 'Confirmado' : 'Pendente'}
-                                                            </span>
-                                                        </div>
+                                    {event.event_registrations.filter(reg => reg.status === 'confirmed' || reg.status === 'pending').map((registration) => (
+                                        <div key={registration.id} className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                                            <div className="flex items-center justify-between">
+                                                <div className="flex-1">
+                                                    <h4 className="font-medium text-gray-900">{registration.user?.full_name}</h4>
+                                                    <p className="text-sm text-gray-600">{registration.user?.email}</p>
+                                                    <div className="flex items-center mt-2">
+                                                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${registration.status === 'confirmed' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>
+                                                            {registration.status === 'confirmed' ? 'Confirmado' : 'Pendente'}
+                                                        </span>
                                                     </div>
-                                                    {canEdit && (
-                                                        <div className="flex space-x-1">
-                                                            <button
-                                                                className="p-1 text-blue-600 hover:bg-blue-50 rounded"
-                                                                aria-label="Gerenciar voluntário"
-                                                            >
-                                                                <Settings className="w-4 h-4" />
-                                                            </button>
-                                                        </div>
-                                                    )}
                                                 </div>
-                                                {registration.registration_notes && (
-                                                    <div className="mt-3 pt-3 border-t border-gray-200">
-                                                        <p className="text-sm text-gray-600">
-                                                            <strong>Observações:</strong> {registration.registration_notes}
-                                                        </p>
+                                                {canEdit && (
+                                                    <div className="flex space-x-1">
+                                                        <button className="p-1 text-blue-600 hover:bg-blue-50 rounded" aria-label="Gerenciar voluntário">
+                                                            <Settings className="w-4 h-4" />
+                                                        </button>
                                                     </div>
                                                 )}
                                             </div>
-                                        ))}
+                                            {registration.registration_notes && (
+                                                <div className="mt-3 pt-3 border-t border-gray-200">
+                                                    <p className="text-sm text-gray-600"><strong>Observações:</strong> {registration.registration_notes}</p>
+                                                </div>
+                                            )}
+                                        </div>
+                                    ))}
                                 </div>
-
                                 {canEdit && (
                                     <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
-                                        <p className="text-sm text-blue-800 mb-2">
-                                            <strong>Próximos passos:</strong> Como administrador, você pode organizar esses voluntários em equipes.
-                                        </p>
-                                        <button className="text-blue-600 hover:text-blue-700 text-sm font-medium">
-                                            Criar equipes automaticamente →
-                                        </button>
+                                        <p className="text-sm text-blue-800 mb-2"><strong>Próximos passos:</strong> Como administrador, você pode organizar esses voluntários em equipes.</p>
+                                        <button className="text-blue-600 hover:text-blue-700 text-sm font-medium">Criar equipes automaticamente →</button>
                                     </div>
                                 )}
                             </div>
                         )}
-
-                        {/* Equipes */}
-                        {event.teams && event.teams.length > 0 && (
-                            <div className="mb-6">
-                                <h3 className="text-lg font-medium text-gray-900 mb-4 flex items-center">
-                                    <Users className="w-5 h-5 mr-2" />
-                                    Equipes ({event.teams.length})
-                                </h3>
-                            </div>
-                        )}
-
+                        {/* Equipes - Histórico se evento finalizado */}
                         {event.teams && event.teams.length > 0 ? (
                             <div className="space-y-6">
                                 {event.teams.map((team) => (
@@ -993,122 +983,95 @@ export const EventDetails: React.FC = () => {
                                         <div className="flex items-center justify-between mb-4">
                                             <div>
                                                 <h3 className="font-medium text-gray-900">{team.name}</h3>
-                                                <p className="text-sm text-gray-600">
-                                                    {team.members?.filter(m => m.status === 'active').length || 0}/{team.max_volunteers} voluntários
-                                                </p>
+                                                <p className="text-sm text-gray-600">{team.members?.filter(m => m.status === 'active').length || 0}/{team.max_volunteers} voluntários</p>
                                             </div>
                                             <div className="flex items-center space-x-2">
-                                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${team.status === 'active' ? 'bg-green-100 text-green-800' :
-                                                    team.status === 'forming' ? 'bg-yellow-100 text-yellow-800' :
-                                                        'bg-gray-100 text-gray-800'
-                                                    }`}>
-                                                    {team.status === 'active' ? 'Ativa' :
-                                                        team.status === 'forming' ? 'Formando' : team.status}
+                                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${team.status === 'active' ? 'bg-green-100 text-green-800' : team.status === 'forming' ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-800'}`}>
+                                                    {team.status === 'active' ? 'Ativa' : team.status === 'forming' ? 'Formando' : team.status}
                                                 </span>
-                                                {canEdit && (
-                                                    <Link
-                                                        to={`/teams/${team.id}/edit`}
-                                                        className="p-1 text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded transition-colors"
-                                                        title="Editar equipe"
-                                                    >
+                                                {/* Bloquear edição se evento finalizado */}
+                                                {canEdit && event.status !== 'completed' && (
+                                                    <Link to={`/teams/${team.id}/edit`} className="p-1 text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded transition-colors" title="Editar equipe">
                                                         <Edit className="w-4 h-4" />
                                                     </Link>
                                                 )}
                                             </div>
                                         </div>
-
                                         {team.members && team.members.length > 0 && (
                                             <div className="space-y-2">
                                                 <h4 className="text-sm font-medium text-gray-700">Membros:</h4>
                                                 <div className="space-y-2">
-                                                    {team.members
-                                                        .filter(member => member.status === 'active')
-                                                        .map((member) => (
-                                                            <div key={member.id} className="flex items-center justify-between bg-gray-50 rounded-lg p-3">
-                                                                <div className="flex items-center space-x-3">
-                                                                    <div>
-                                                                        <p className="font-medium text-gray-900">{member.user?.full_name}</p>
-                                                                        <p className="text-sm text-gray-600">{member.user?.email}</p>
-                                                                    </div>
-                                                                    <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${member.role_in_team === 'captain' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800'
-                                                                        }`}>
-                                                                        {member.role_in_team === 'captain' ? 'Capitão' : 'Voluntário'}
-                                                                    </span>
+                                                    {team.members.filter(member => member.status === 'active').map((member) => (
+                                                        <div key={member.id} className="flex items-center justify-between bg-gray-50 rounded-lg p-3">
+                                                            <div className="flex items-center space-x-3">
+                                                                <div>
+                                                                    <p className="font-medium text-gray-900">{member.user?.full_name}</p>
+                                                                    <p className="text-sm text-gray-600">{member.user?.email}</p>
                                                                 </div>
-
-                                                                {canEdit && member.role_in_team !== 'captain' && (
-                                                                    <button
-                                                                        onClick={() => handleRemoveVolunteer(team.id, member.id)}
-                                                                        className="p-1 text-red-600 hover:text-red-700 hover:bg-red-50 rounded"
-                                                                        title="Remover voluntário"
-                                                                    >
-                                                                        <UserMinus className="w-4 h-4" />
-                                                                    </button>
-                                                                )}
+                                                                <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${member.role_in_team === 'captain' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800'}`}>{member.role_in_team === 'captain' ? 'Capitão' : 'Voluntário'}</span>
                                                             </div>
-                                                        ))}
+                                                            {/* Bloquear remoção se evento finalizado */}
+                                                            {canEdit && member.role_in_team !== 'captain' && event.status !== 'completed' && (
+                                                                <button onClick={() => handleRemoveVolunteer(team.id, member.id)} className="p-1 text-red-600 hover:text-red-700 hover:bg-red-50 rounded" title="Remover voluntário">
+                                                                    <UserMinus className="w-4 h-4" />
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                    ))}
                                                 </div>
                                             </div>
                                         )}
-
                                         {/* Botões de ação para voluntários */}
-                                        {user?.role === 'volunteer' && !canEdit && (
+                                        {user?.role === 'volunteer' && !canEdit && event.status !== 'completed' && (
                                             <div className="mt-4 pt-4 border-t border-gray-200">
                                                 {(() => {
-                                                    const userInTeam = team.members?.find(member =>
-                                                        member.user?.id === user.id && member.status === 'active'
-                                                    )
-                                                    const teamIsFull = (team.members?.filter(m => m.status === 'active').length || 0) >= team.max_volunteers
-
+                                                    const userInTeam = team.members?.find(member => member.user?.id === user.id && member.status === 'active');
+                                                    const teamIsFull = (team.members?.filter(m => m.status === 'active').length || 0) >= team.max_volunteers;
                                                     if (userInTeam) {
                                                         return (
-                                                            <button
-                                                                onClick={() => handleVolunteerLeave(team.id)}
-                                                                className="flex items-center space-x-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
-                                                            >
+                                                            <button onClick={() => handleVolunteerLeave(team.id)} className="flex items-center space-x-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors">
                                                                 <UserMinus className="w-4 h-4" />
                                                                 <span>Sair da Equipe</span>
                                                             </button>
-                                                        )
+                                                        );
                                                     } else if (teamIsFull) {
                                                         return (
                                                             <div className="flex items-center space-x-2 px-4 py-2 bg-gray-100 text-gray-500 rounded-lg">
                                                                 <AlertCircle className="w-4 h-4" />
                                                                 <span>Equipe Lotada</span>
                                                             </div>
-                                                        )
+                                                        );
                                                     } else {
                                                         return (
-                                                            <button
-                                                                onClick={() => handleVolunteerRegister(team.id)}
-                                                                className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                                                            >
+                                                            <button onClick={() => handleVolunteerRegister(team.id)} className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
                                                                 <UserPlus className="w-4 h-4" />
-                                                                <span>Inscrever-se na Equipe</span>
+                                                                <span>Entrar na Equipe</span>
                                                             </button>
-                                                        )
+                                                        );
                                                     }
                                                 })()}
+                                            </div>
+                                        )}
+                                        {/* Mensagem de histórico se evento finalizado */}
+                                        {event.status === 'completed' && (
+                                            <div className="mt-4 p-3 bg-gray-50 rounded-lg border border-gray-200 text-gray-700 text-sm">
+                                                <AlertCircle className="w-4 h-4 mr-2 inline" />
+                                                Este evento está finalizado. As equipes abaixo são apenas para histórico e não podem ser editadas.
                                             </div>
                                         )}
                                     </div>
                                 ))}
                             </div>
-                        ) : (
-                            <div className="text-center py-8">
-                                <Users className="mx-auto h-12 w-12 text-gray-400 mb-4" />
-                                <h3 className="text-lg font-medium text-gray-900 mb-2">Nenhuma equipe criada</h3>
-                                <p className="text-gray-500 mb-4">Crie a primeira equipe para este evento.</p>
-                                {canEdit && (
-                                    <Link
-                                        to={`/teams/create?event=${event.id}`}
-                                        className="inline-flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                                    >
-                                        <UserPlus className="w-4 h-4" />
-                                        <span>Criar Equipe</span>
-                                    </Link>
-                                )}
-                            </div>
+                        ) : null}
+                        {/* Botão de criar equipe só para eventos ativos */}
+                        {canEdit && event.status !== 'completed' && (
+                            <Link
+                                to={`/teams/create?event=${event.id}`}
+                                className="inline-flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                            >
+                                <UserPlus className="w-4 h-4" />
+                                <span>Criar Equipe</span>
+                            </Link>
                         )}
                     </div>
                 </div>

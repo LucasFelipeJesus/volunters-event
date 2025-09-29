@@ -57,7 +57,7 @@ export const CreateTeam: React.FC = () => {
                 const { data: eventsData } = await supabase
                     .from('events')
                     .select('*')
-                    .eq('status', 'published')
+                    .in('status', ['published', 'in_progress'])
                     .gte('event_date', new Date().toISOString().split('T')[0])
                     .order('event_date', { ascending: true })
 

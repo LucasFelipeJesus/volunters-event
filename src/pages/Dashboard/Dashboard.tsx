@@ -77,12 +77,16 @@ export const Dashboard: React.FC = () => {
       if (user?.role === 'admin') {
         // Dashboard para ADMINISTRADORES
 
-        // 1. Buscar eventos ativos (publicados e não passados)
-        const { data: activeEventsData } = await supabase
+        // Buscar todos os eventos
+        const { data: allEventsData } = await supabase
           .from('events')
           .select('*')
-          .eq('status', 'published')
-          .gte('event_date', today)
+          .order('event_date', { ascending: true })
+
+        // Eventos ativos: status published/in_progress e data >= hoje
+        const activeEventsData = allEventsData?.filter(ev => ['published', 'in_progress'].includes(ev.status) && ev.event_date >= today) || []
+        // Eventos concluídos: status completed ou data < hoje
+        const completedEventsData = allEventsData?.filter(ev => ev.status === 'completed' || ev.event_date < today) || []
 
         // 2. Buscar quantidade total de voluntários cadastrados (excluindo administradores)
         const { data: volunteersData } = await supabase
@@ -96,12 +100,6 @@ export const Dashboard: React.FC = () => {
           user.role === 'captain'
         )
 
-        // 3. Buscar eventos concluídos
-        const { data: completedEventsData } = await supabase
-          .from('events')
-          .select('*')
-          .eq('status', 'completed')
-
         // 4. Buscar classificação de voluntários e capitães (top avaliados)
         const { data: topVolunteersData } = await supabase
           .from('evaluations')
@@ -111,13 +109,24 @@ export const Dashboard: React.FC = () => {
           .from('admin_evaluations')
           .select('captain_id, overall_rating')
 
-        // 5. Buscar estatísticas de equipes
-        const { data: teamsData } = await supabase
-          .from('teams')
-          .select('id, status')
+        // 5. Buscar estatísticas de equipes (apenas de eventos ativos)
+        const { data: activeEventIds } = await supabase
+          .from('events')
+          .select('id')
+          .in('status', ['published', 'in_progress'])
+          .gte('event_date', today)
 
-        const totalTeams = teamsData?.length || 0
-        const activeTeams = teamsData?.filter(team => team.status === 'complete').length || 0
+        const activeIds = (activeEventIds || []).map(ev => ev.id)
+        let totalTeams = 0
+        let activeTeams = 0
+        if (activeIds.length > 0) {
+          const { data: teamsData } = await supabase
+            .from('teams')
+            .select('id, status, event_id')
+            .in('event_id', activeIds)
+          totalTeams = teamsData?.length || 0
+          activeTeams = teamsData?.filter(team => team.status === 'complete').length || 0
+        }
         setTeamStats({
           totalTeams,
           activeTeams
@@ -157,7 +166,9 @@ export const Dashboard: React.FC = () => {
           activeEvents: activeEventsData?.length || 0,
           topVolunteers: topPerformers,
           registeredVolunteers: activeVolunteers?.length || 0,
-          completedEvents: completedEventsData?.length || 0,
+          completedEvents: Array.isArray(completedEventsData)
+            ? completedEventsData.filter(ev => ev.status === 'completed' || ev.event_date < today).length
+            : 0,
           myParticipations: 0 // Não usado para administradores
         })
 

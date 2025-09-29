@@ -43,7 +43,24 @@ export const EventsList: React.FC = () => {
   const [filterCategory, setFilterCategory] = useState<string>('all')
 
   useEffect(() => {
-    fetchEvents()
+    const updatePastEventsStatus = async () => {
+      const todayString = new Date().toISOString().split('T')[0];
+      // Busca eventos publicados/in_progress com data passada
+      const { data: outdatedEvents, error } = await supabase
+        .from('events')
+        .select('id, event_date, status')
+        .in('status', ['published', 'in_progress'])
+        .lt('event_date', todayString);
+      if (error) return;
+      if (outdatedEvents && outdatedEvents.length > 0) {
+        const ids = outdatedEvents.map(e => e.id);
+        await supabase
+          .from('events')
+          .update({ status: 'completed' })
+          .in('id', ids);
+      }
+    };
+    updatePastEventsStatus().then(fetchEvents);
   }, [])
 
   const fetchEvents = async () => {
@@ -82,14 +99,17 @@ export const EventsList: React.FC = () => {
 
     const todayString = new Date().toISOString().split('T')[0];
 
+    // Total de eventos
     const totalEvents = events.length
-    const activeEvents = events.filter(e => e.status === 'published' && e.event_date >= todayString).length
+    // Eventos ativos: status published ou in_progress e data >= hoje
+    const activeEvents = events.filter(e => ['published', 'in_progress'].includes(e.status) && e.event_date >= todayString).length
+    // Eventos concluídos: status completed ou data < hoje
     const completedEvents = events.filter(e => e.status === 'completed' || e.event_date < todayString).length
 
+    // Estatísticas de alocação só para eventos ativos
     let totalVolunteers = 0
     let totalMaxVolunteers = 0
-
-    events.forEach(event => {
+    events.filter(e => ['published', 'in_progress'].includes(e.status) && e.event_date >= todayString).forEach(event => {
       const count = getEventVolunteerCount(event);
       totalVolunteers += count.current;
       totalMaxVolunteers += count.max;
@@ -296,6 +316,13 @@ export const EventsList: React.FC = () => {
                         {event.category}
                       </span>
                     )}
+                    {/* Selo de evento finalizado */}
+                    {event.status === 'completed' && (
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-gray-200 text-gray-700 ml-2">
+                        <CheckCircle className="w-3 h-3 mr-1.5 text-gray-600" />
+                        Finalizado
+                      </span>
+                    )}
                     {isEventFull(event) && (
                       <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
                         Lotado
@@ -310,6 +337,10 @@ export const EventsList: React.FC = () => {
                   <div className="flex items-center space-x-2 text-gray-700">
                     <Calendar className="w-4 h-4 text-gray-400 flex-shrink-0" />
                     <span className="font-medium">{formatDateDisplay(event.event_date)}</span>
+                    {/* Travar edição para admin se evento finalizado */}
+                    {user?.role === 'admin' && event.status === 'completed' && (
+                      <span className="ml-2 px-2 py-0.5 rounded text-xs font-semibold bg-red-100 text-red-700" title="Edição bloqueada">Edição bloqueada</span>
+                    )}
                   </div>
                   <div className="flex items-center space-x-2 text-gray-700">
                     <Clock className="w-4 h-4 text-gray-400 flex-shrink-0" />
