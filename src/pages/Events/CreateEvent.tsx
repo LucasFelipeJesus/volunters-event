@@ -223,6 +223,58 @@ export const CreateEvent: React.FC = () => {
                 ])
             }
 
+            // Adicionar pergunta padrão de área de preferência para eventos Agenda FS
+            if (data.category === 'agenda-FS' && eventData?.id) {
+                try {
+                    // Criar a pergunta
+                    const { data: questionData, error: questionError } = await supabase
+                        .from('event_terms_questions')
+                        .insert({
+                            event_id: eventData.id,
+                            question_text: 'Qual área de sua preferência? Pode escolher mais de uma opção (não é certeza que você será alocado nessa área, é apenas um indicativo)',
+                            question_type: 'multiple_choice',
+                            is_required: false,
+                            allow_multiple: true,
+                            question_order: 1,
+                            is_active: true
+                        })
+                        .select()
+                        .single()
+
+                    if (questionError) throw questionError
+
+                    // Criar as opções da pergunta
+                    if (questionData?.id) {
+                        const options = [
+                            { text: 'Parrilla', value: 'parrilla', order: 1 },
+                            { text: 'Fogo de chão', value: 'fogo_chao', order: 2 },
+                            { text: 'Pitsmoker (defumação)', value: 'pitsmoker', order: 3 },
+                            { text: 'Burger', value: 'burger', order: 4 },
+                            { text: 'Carreteiro', value: 'carreteiro', order: 5 },
+                            { text: 'Pão de Alho', value: 'pao_alho', order: 6 },
+                            { text: 'Sobremesa', value: 'sobremesa', order: 7 },
+                            { text: 'Tortilha', value: 'tortilha', order: 8 },
+                            { text: 'Macarrão Campeiro', value: 'macarrao_campeiro', order: 9 },
+                            { text: 'Não tenho preferência (pau para toda obra)', value: 'sem_preferencia', order: 10 }
+                        ]
+
+                        const optionsToInsert = options.map(option => ({
+                            question_id: questionData.id,
+                            option_text: option.text,
+                            option_value: option.value,
+                            option_order: option.order
+                        }))
+
+                        await supabase
+                            .from('event_terms_question_options')
+                            .insert(optionsToInsert)
+                    }
+                } catch (questionError) {
+                    console.error('Erro ao criar pergunta padrão:', questionError)
+                    // Não falha a criação do evento se houver erro na pergunta
+                }
+            }
+
             // Opcional: Registrar criador (verificar se a lógica de status 'registered' está correta para seu fluxo)
             if (eventData?.id && user?.id) {
                 await supabase.from('event_registrations').insert([

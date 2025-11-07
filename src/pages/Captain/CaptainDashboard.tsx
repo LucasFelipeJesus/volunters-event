@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../hooks/useAuth'
 import { supabase } from '../../lib/supabase'
 import { EventTermsModal } from '../../components/EventTermsModal'
@@ -15,7 +16,9 @@ import {
     Search,
     LogOut,
     FileText,
-    AlertTriangle
+    AlertTriangle,
+    UserCheck,
+    BarChart3
 } from 'lucide-react'
 
 // Tipos específicos para o dashboard
@@ -124,7 +127,8 @@ const formatDateDisplay = (dateString?: string) => {
 
 export const CaptainDashboard: React.FC = () => {
     const { user } = useAuth()
-    const [activeTab, setActiveTab] = useState<'participations' | 'evaluations' | 'history'>('participations')
+    const navigate = useNavigate()
+    const [activeTab, setActiveTab] = useState<'participations' | 'avaliacoes' | 'history'>('participations')
     const [loading, setLoading] = useState(true)
     const [searchTerm, setSearchTerm] = useState('')
 
@@ -249,8 +253,8 @@ export const CaptainDashboard: React.FC = () => {
     };
 
     const handleQuickRegister = async (eventId: string) => {
-        if (!user || user.role !== 'volunteer') {
-            alert('Apenas voluntários podem se inscrever em eventos.');
+        if (!user) {
+            alert('Você precisa estar logado para se inscrever em eventos.');
             return;
         }
         try {
@@ -294,7 +298,7 @@ export const CaptainDashboard: React.FC = () => {
             const { data: eventInfo, error: eventError } = await supabase.from('events').select('id, title, max_volunteers').eq('id', eventId).single();
             if (eventError || !eventInfo) throw eventError || new Error('Evento não encontrado.');
 
-            const { count: activeRegistrations, error: countError } = await supabase.from('event_registrations').select('id', { count: 'exact' }).eq('event_id', eventId).eq('status', 'confirmed');
+            const { count: activeRegistrations, error: countError } = await supabase.from('event_registrations').select('id', { count: 'exact' }).eq('event_id', eventId).in('status', ['confirmed', 'pending']);
             if (countError) throw countError;
 
             if ((eventInfo.max_volunteers || 0) - (activeRegistrations || 0) <= 0) {
@@ -312,9 +316,10 @@ export const CaptainDashboard: React.FC = () => {
                 alert(`Você foi inscrito com sucesso no evento "${eventInfo.title}"!`);
             }
             await fetchVolunteerData();
-        } catch (error: any) {
-            console.error('Erro ao se inscrever no evento:', error);
-            alert(error.code === '23505' ? 'Você já está inscrito neste evento.' : 'Erro ao se inscrever no evento. Tente novamente.');
+        } catch (err) {
+            console.error('Erro ao se inscrever no evento:', err);
+            const supabaseError = (err as { code?: string } | null);
+            alert(supabaseError?.code === '23505' ? 'Você já está inscrito neste evento.' : 'Erro ao se inscrever no evento. Tente novamente.');
         }
     };
 
@@ -472,7 +477,6 @@ export const CaptainDashboard: React.FC = () => {
                                                 <div className="flex items-center space-x-2"><Calendar className="w-4 h-4 text-gray-400" /><span>{formatDateDisplay(event.event_date)}</span></div>
                                                 <div className="flex items-center space-x-2"><Clock className="w-4 h-4 text-gray-400" /><span>{formatTime(event.start_time)} - {formatTime(event.end_time)}</span></div>
                                                 <div className="flex items-center space-x-2"><MapPin className="w-4 h-4 text-gray-400" /><span>{event.location}</span></div>
-                                                <div className="flex items-center space-x-2"><Users className="w-4 h-4 text-gray-400" /><span>{event.totalSpots - event.availableSpots}/{event.totalSpots} vagas</span></div>
                                             </div>
                                         </div>
                                         <div className="pt-3 mt-auto border-t border-gray-200 flex items-center justify-between">
@@ -499,8 +503,8 @@ export const CaptainDashboard: React.FC = () => {
             <div className="bg-white rounded-lg shadow-sm border border-gray-200">
                 <div className="border-b border-gray-200">
                     <nav className="flex space-x-8 px-6">
-                        {[{ id: 'participations', label: 'Minhas Participações', icon: Users }, { id: 'evaluations', label: 'Minhas Avaliações', icon: Star }, { id: 'history', label: 'Histórico', icon: Clock }].map((tab) => (
-                            <button key={tab.id} onClick={() => setActiveTab(tab.id as any)} className={`flex items-center space-x-2 py-4 border-b-2 font-medium text-sm transition-colors ${activeTab === tab.id ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}>
+                        {[{ id: 'participations', label: 'Minhas Participações', icon: Users }, { id: 'avaliacoes', label: 'Sistema de Avaliações', icon: BarChart3 }, { id: 'history', label: 'Histórico', icon: Clock }].map((tab) => (
+                            <button key={tab.id} onClick={() => setActiveTab(tab.id as 'participations' | 'avaliacoes' | 'history')} className={`flex items-center space-x-2 py-4 border-b-2 font-medium text-sm transition-colors ${activeTab === tab.id ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}>
                                 <tab.icon className="w-5 h-5" /><span>{tab.label}</span>
                             </button>
                         ))}
@@ -539,25 +543,81 @@ export const CaptainDashboard: React.FC = () => {
                             )}
                         </div>
                     )}
-                    {activeTab === 'evaluations' && (
-                        <div>
-                            {myEvaluations.length === 0 ? (
-                                <div className="text-center py-12"><Star className="mx-auto h-12 w-12 text-gray-400 mb-4" /><h3 className="text-lg font-medium text-gray-900">Nenhuma avaliação recebida</h3><p className="text-sm text-gray-500 mt-2">Suas avaliações aparecerão aqui após os eventos.</p></div>
-                            ) : (
-                                <div className="space-y-4">
-                                        {myEvaluations.map((e) => (
-                                            <div key={e.id} className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-                                                <div className="flex items-start justify-between">
-                                                <div>
-                                                    <h3 className="font-semibold text-gray-900">{e.event?.title}</h3>
-                                                    <p className="text-sm text-gray-600">{formatDateDisplay(e.event?.event_date)}</p>
-                                                </div>
-                                                {renderStarRating(e.rating)}
-                                            </div>
+                    {activeTab === 'avaliacoes' && (
+                        <div className="space-y-6">
+                            <div className="text-center">
+                                <h3 className="text-lg font-medium text-gray-900 mb-2">Sistema de Avaliação Bidirecional</h3>
+                                <p className="text-sm text-gray-600 mb-6">Avalie seus voluntários e acompanhe suas próprias avaliações recebidas</p>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                {/* Card - Avaliar Voluntários */}
+                                <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg p-6 border border-blue-200 hover:shadow-md transition-shadow">
+                                    <div className="flex items-center space-x-3 mb-4">
+                                        <div className="bg-blue-500 p-3 rounded-lg">
+                                            <UserCheck className="w-6 h-6 text-white" />
                                         </div>
-                                    ))}
+                                        <div>
+                                            <h4 className="text-lg font-semibold text-blue-900">Avaliar Voluntários</h4>
+                                            <p className="text-sm text-blue-600">Avalie o desempenho da sua equipe</p>
+                                        </div>
+                                    </div>
+                                    <p className="text-sm text-gray-600 mb-4">
+                                        Avalie o trabalho em equipe, pontualidade, comunicação e outras habilidades dos voluntários que trabalharam com você.
+                                    </p>
+                                    <button
+                                        onClick={() => navigate('/captain/avaliar-equipe')}
+                                        className="w-full bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors font-medium"
+                                    >
+                                        Avaliar Voluntários
+                                    </button>
                                 </div>
-                            )}
+
+                                {/* Card - Minhas Avaliações Recebidas */}
+                                <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-lg p-6 border border-green-200 hover:shadow-md transition-shadow">
+                                    <div className="flex items-center space-x-3 mb-4">
+                                        <div className="bg-green-500 p-3 rounded-lg">
+                                            <BarChart3 className="w-6 h-6 text-white" />
+                                        </div>
+                                        <div>
+                                            <h4 className="text-lg font-semibold text-green-900">Minhas Avaliações</h4>
+                                            <p className="text-sm text-green-600">Veja suas avaliações de liderança</p>
+                                        </div>
+                                    </div>
+                                    <p className="text-sm text-gray-600 mb-4">
+                                        Acompanhe todas as avaliações que você recebeu dos voluntários sobre sua liderança, comunicação e suporte oferecido.
+                                    </p>
+                                    <button
+                                        onClick={() => navigate('/captain/minhas-avaliacoes')}
+                                        className="w-full bg-green-600 text-white py-2 px-4 rounded-lg hover:bg-green-700 transition-colors font-medium"
+                                    >
+                                        Ver Minhas Avaliações
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Estatísticas rápidas */}
+                            <div className="bg-gray-50 rounded-lg p-6 border border-gray-200">
+                                <h4 className="text-lg font-semibold text-gray-900 mb-4">Estatísticas Rápidas</h4>
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                    <div className="text-center">
+                                        <div className="text-2xl font-bold text-blue-600">{stats.totalEvaluations}</div>
+                                        <div className="text-sm text-gray-600">Avaliações Recebidas</div>
+                                    </div>
+                                    <div className="text-center">
+                                        <div className="text-2xl font-bold text-green-600">{stats.averageRating.toFixed(1)}</div>
+                                        <div className="text-sm text-gray-600">Média Geral</div>
+                                    </div>
+                                    <div className="text-center">
+                                        <div className="text-2xl font-bold text-purple-600">{stats.completedEvents}</div>
+                                        <div className="text-sm text-gray-600">Eventos Liderados</div>
+                                    </div>
+                                    <div className="text-center">
+                                        <div className="text-2xl font-bold text-orange-600">{stats.activeParticipations}</div>
+                                        <div className="text-sm text-gray-600">Equipes Ativas</div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     )}
                     {activeTab === 'history' && (

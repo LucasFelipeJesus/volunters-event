@@ -17,12 +17,12 @@ import {
 
 // --- FUNÇÃO AUXILIAR PARA CONTAR VOLUNTÁRIOS ---
 const getEventVolunteerCount = (event: Event): { current: number; max: number } => {
-  const confirmedRegistrations = event.event_registrations?.filter(
-    (reg: EventRegistration) => reg.status === 'confirmed'
+  const activeRegistrations = event.event_registrations?.filter(
+    (reg: EventRegistration) => reg.status === 'confirmed' || reg.status === 'pending'
   ).length || 0;
 
   return {
-    current: confirmedRegistrations,
+    current: activeRegistrations,
     max: event.max_volunteers || 0,
   };
 };

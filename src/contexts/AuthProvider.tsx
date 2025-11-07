@@ -363,6 +363,20 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
         return await userService.promoteToCaptain(userId)
     }
 
+    const demoteUser = async (userId: string): Promise<boolean> => {
+        if (!user || user.role !== 'admin') {
+            throw new Error('Acesso negado: apenas administradores podem demover usuários')
+        }
+        return await userService.demoteToVolunteer(userId)
+    }
+
+    const demoteCaptainsAfterEvent = async (eventId: string): Promise<number> => {
+        if (!user || user.role !== 'admin') {
+            throw new Error('Acesso negado: apenas administradores podem executar demoção em lote')
+        }
+        return await userService.demoteCaptainsAfterEvent(eventId)
+    }
+
     const deleteAccount = async (): Promise<boolean> => {
         if (!user) throw new Error('Usuário não autenticado')
 
@@ -392,6 +406,8 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
         updateProfile,
         resetPassword,
         promoteUser,
+        demoteUser,
+        demoteCaptainsAfterEvent,
         deleteAccount,
         isFirstLogin,
         completeFirstLogin

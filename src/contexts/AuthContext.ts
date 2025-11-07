@@ -12,6 +12,8 @@ export interface AuthContextType {
     updateProfile: (updates: Partial<User>) => Promise<void>
     resetPassword: (email: string) => Promise<void>
     promoteUser: (userId: string) => Promise<boolean>
+    demoteUser: (userId: string) => Promise<boolean>
+    demoteCaptainsAfterEvent: (eventId: string) => Promise<number>
     deleteAccount: () => Promise<boolean>
     isFirstLogin: boolean
     completeFirstLogin: () => Promise<void>

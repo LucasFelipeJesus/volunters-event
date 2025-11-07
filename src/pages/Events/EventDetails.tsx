@@ -95,7 +95,7 @@ interface ExtendedEvent {
 
 export const EventDetails: React.FC = () => {
     const { id } = useParams<{ id: string }>()
-    const { user } = useAuth()
+    const { user, demoteCaptainsAfterEvent } = useAuth()
     const navigate = useNavigate()
 
     const [event, setEvent] = useState<ExtendedEvent | null>(null)
@@ -320,6 +320,16 @@ export const EventDetails: React.FC = () => {
                     .eq('status', 'active')
                 if (membersError) {
                     console.error('Erro ao desalocar membros das equipes:', membersError)
+                }
+
+                // Demover capitães de volta a voluntários
+                try {
+                    const demotedCount = await demoteCaptainsAfterEvent(id!)
+                    if (demotedCount > 0) {
+                        console.log(`✅ ${demotedCount} capitães foram demovidos automaticamente após finalização do evento`)
+                    }
+                } catch (error) {
+                    console.error('❌ Erro ao demover capitães após finalização do evento:', error)
                 }
             }
 

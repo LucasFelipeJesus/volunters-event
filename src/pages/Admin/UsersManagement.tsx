@@ -8,7 +8,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '../../hooks/useAuth'
 import { supabase } from '../../lib/supabase'
-import { setUserRole } from '../../lib/services'
 import {
     User,
     Star,
@@ -81,7 +80,7 @@ interface Evaluation {
 }
 
 export const AdminUsersManagement: React.FC = () => {
-    const { user } = useAuth()
+    const { user, promoteUser, demoteUser } = useAuth()
     const [users, setUsers] = useState<UserProfile[]>([])
     const [filteredUsers, setFilteredUsers] = useState<UserProfile[]>([])
     const [loading, setLoading] = useState(true)
@@ -201,22 +200,28 @@ export const AdminUsersManagement: React.FC = () => {
 
     const promoteToCapitain = async (userId: string) => {
         try {
-            const error = await setUserRole(userId, 'captain')
-            if (error) throw error
-            alert('Usuário promovido a capitão com sucesso!')
-            fetchUsers()
+            const success = await promoteUser(userId)
+            if (success) {
+                alert('Usuário promovido a capitão com sucesso!')
+                fetchUsers()
+            } else {
+                alert('Erro ao promover usuário - verifique se ele é elegível para promoção')
+            }
         } catch (error) {
             console.error('Erro ao promover usuário:', error)
-            alert('Erro ao promover usuário')
+            alert('Erro ao promover usuário: ' + (error as Error).message)
         }
     }
 
     const demoteToVolunteer = async (userId: string) => {
         try {
-            const error = await setUserRole(userId, 'volunteer')
-            if (error) throw error
-            alert('Usuário revertido para voluntário com sucesso!')
-            fetchUsers()
+            const success = await demoteUser(userId)
+            if (success) {
+                alert('Usuário revertido para voluntário com sucesso!')
+                fetchUsers()
+            } else {
+                alert('Erro ao demover usuário - verifique se ele é capitão')
+            }
         } catch (error) {
             console.error('Erro ao reverter usuário:', error)
             alert('Erro ao reverter usuário')

@@ -20,6 +20,9 @@ import { Profile } from './pages/Profile/Profile'
 import { VolunteerDashboard } from './pages/Volunteer/VolunteerDashboard'
 import { CaptainDashboard } from './pages/Captain/CaptainDashboard'
 import AvaliarEquipe from './pages/Captain/AvaliarEquipe'
+import AvaliarCapitao from './pages/Volunteer/AvaliarCapitao'
+import MinhasAvaliacoesVoluntario from './pages/Volunteer/MinhasAvaliacoes'
+import MinhasAvaliacoesCapitao from './pages/Captain/MinhasAvaliacoes'
 
 // Admin Pages
 import { AdminUsersManagement } from './pages/Admin/UsersManagement'
@@ -45,8 +48,11 @@ function App() {
           }>
             <Route index element={<Dashboard />} />
             <Route path="volunteer" element={<VolunteerDashboard />} />
+            <Route path="volunteer/avaliar-capitao" element={<AvaliarCapitao />} />
+            <Route path="volunteer/minhas-avaliacoes" element={<MinhasAvaliacoesVoluntario />} />
             <Route path="captain" element={<CaptainDashboard />} />
             <Route path="captain/avaliar-equipe" element={<AvaliarEquipe />} />
+            <Route path="captain/minhas-avaliacoes" element={<MinhasAvaliacoesCapitao />} />
             <Route path="events" element={<EventsList />} />
             <Route path="events/create" element={<CreateEvent />} />
             <Route path="events/:id" element={<EventDetails />} />

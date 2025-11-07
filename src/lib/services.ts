@@ -259,6 +259,95 @@ export const userService = {
             console.error('❌ Erro inesperado ao promover usuário:', error)
             return false
         }
+    },
+
+    // Demover usuário de capitão para voluntário
+    async demoteToVolunteer(userId: string): Promise<boolean> {
+        try {
+            const { data, error } = await supabase
+                .from('users')
+                .update({ role: 'volunteer' })
+                .eq('id', userId)
+                .eq('role', 'captain')
+                .select()
+
+            if (error) {
+                console.error('❌ Erro ao demover usuário:', {
+                    userId,
+                    code: error.code,
+                    message: error.message
+                })
+                return false
+            }
+
+            if (!data || data.length === 0) {
+                console.error('❌ Usuário não encontrado ou não é capitão:', userId)
+                return false
+            }
+
+            console.log('📉 Usuário demovido a voluntário com sucesso:', userId)
+            return true
+        } catch (error) {
+            console.error('❌ Erro inesperado ao demover usuário:', error)
+            return false
+        }
+    },
+
+    // Demover capitães após finalização de evento
+    async demoteCaptainsAfterEvent(eventId: string): Promise<number> {
+        try {
+            // Buscar capitães que lideraram equipes neste evento
+            const { data: teams, error: teamsError } = await supabase
+                .from('teams')
+                .select(`
+                    captain_id,
+                    users!teams_captain_id_fkey(id, full_name, role)
+                `)
+                .eq('event_id', eventId)
+
+            if (teamsError) {
+                console.error('❌ Erro ao buscar equipes do evento:', teamsError)
+                return 0
+            }
+
+            if (!teams || teams.length === 0) {
+                console.log('ℹ️ Nenhuma equipe encontrada para o evento:', eventId)
+                return 0
+            }
+
+            // Filtrar apenas usuários que são capitães (não admins)
+            const captainsTodemote = teams
+                .filter(team => {
+                    const user = Array.isArray(team.users) ? team.users[0] : team.users;
+                    return user?.role === 'captain';
+                })
+                .map(team => team.captain_id)
+
+            if (captainsTodemote.length === 0) {
+                console.log('ℹ️ Nenhum capitão para demover no evento:', eventId)
+                return 0
+            }
+
+            // Demover todos os capitães de uma vez
+            const { data, error } = await supabase
+                .from('users')
+                .update({ role: 'volunteer' })
+                .in('id', captainsTodemote)
+                .eq('role', 'captain') // Garantir que só demova capitães
+                .select()
+
+            if (error) {
+                console.error('❌ Erro ao demover capitães em lote:', error)
+                return 0
+            }
+
+            const demotedCount = data?.length || 0
+            console.log(`📉 ${demotedCount} capitães demovidos após finalização do evento:`, eventId)
+            return demotedCount
+        } catch (error) {
+            console.error('❌ Erro inesperado ao demover capitães:', error)
+            return 0
+        }
     }
 }
 
