@@ -205,12 +205,17 @@ export const CaptainDashboard: React.FC = () => {
             const finalParticipations = Array.from(uniqueParticipations.values()).sort((a, b) => (b.team.event.event_date || '').localeCompare(a.team.event.event_date || ''));
             setMyParticipations(finalParticipations);
 
+            // Variável local para avaliações (evita ReferenceError se não for voluntário)
+            let evaluationsDataLocal: any[] | undefined = undefined;
             // Se o usuário for voluntário, carregar avaliações recebidas como voluntário
             if (user.role === 'volunteer') {
-                const { data: evaluationsData } = await supabase.from('evaluations').select(`*, captain:users!evaluations_captain_id_fkey(id, full_name), event:events(id, title, event_date), team:teams(id, name)`).eq('volunteer_id', user.id);
-                setMyEvaluations(evaluationsData || []);
+                const { data: evaluationsData, error: evalError } = await supabase.from('evaluations').select(`*, captain:users!evaluations_captain_id_fkey(id, full_name), event:events(id, title, event_date), team:teams(id, name)`).eq('volunteer_id', user.id);
+                if (evalError) console.warn('Erro ao buscar avaliações do voluntário:', evalError);
+                evaluationsDataLocal = evaluationsData || [];
+                setMyEvaluations(evaluationsDataLocal);
             } else {
                 // limpar para evitar resíduos
+                evaluationsDataLocal = [];
                 setMyEvaluations([]);
             }
 
@@ -234,7 +239,8 @@ export const CaptainDashboard: React.FC = () => {
 
             const activeParticipations = finalParticipations.filter(p => p.status === 'active' && p.team.event.event_date && p.team.event.event_date >= todayString).length;
             const completedEvents = finalParticipations.filter(p => p.team.event.event_date && p.team.event.event_date < todayString).length;
-            const avgRating = evaluationsData && evaluationsData.length > 0 ? evaluationsData.reduce((sum, e) => sum + e.rating, 0) / evaluationsData.length : 0;
+            const evalsForAvg = typeof evaluationsDataLocal !== 'undefined' ? evaluationsDataLocal : (myEvaluations || []);
+            const avgRating = evalsForAvg && evalsForAvg.length > 0 ? evalsForAvg.reduce((sum, e) => sum + e.rating, 0) / evalsForAvg.length : 0;
             const categoryCount = finalParticipations.reduce((acc, p) => {
                 const category = p.team?.event?.category || 'other';
                 acc.set(category, (acc.get(category) || 0) + 1);
@@ -242,7 +248,7 @@ export const CaptainDashboard: React.FC = () => {
             }, new Map<string, number>());
             const bestCategory = categoryCount.size > 0 ? [...categoryCount.entries()].reduce((a, b) => a[1] > b[1] ? a : b)[0] : '';
 
-            setStats({ totalParticipations: finalParticipations.length, activeParticipations, completedEvents, averageRating: Math.round(avgRating * 10) / 10, totalEvaluations: evaluationsData?.length || 0, bestCategory });
+            setStats({ totalParticipations: finalParticipations.length, activeParticipations, completedEvents, averageRating: Math.round(avgRating * 10) / 10, totalEvaluations: (evalsForAvg || []).length || 0, bestCategory });
 
         } catch (error) {
             console.error('Erro ao carregar dados do voluntário:', error);

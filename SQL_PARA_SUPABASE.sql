@@ -7,15 +7,11 @@ CREATE POLICY "User access policy" ON users
 FOR SELECT
 TO authenticated
 USING (
-  -- Usuários podem ver seu próprio perfil
-  auth.uid() = id
-  OR
-  -- Administradores podem ver todos os usuários
-  EXISTS (
-    SELECT 1 FROM users 
-    WHERE users.id = auth.uid() 
-    AND users.role = 'admin'
-  )
+    -- Usuários podem ver seu próprio perfil
+    auth.uid() = id
+    OR
+    -- Administradores identificados via claim JWT 'user_role' = 'admin'
+    (auth.jwt() ->> 'user_role') = 'admin'
 );
 
 -- 2. Função RPC para administradores (alternativa)
@@ -43,11 +39,8 @@ SECURITY DEFINER
 LANGUAGE plpgsql
 AS $$
 BEGIN
-    -- Verificar se o usuário atual é admin
-    IF NOT EXISTS (
-        SELECT 1 FROM users 
-        WHERE id = auth.uid() AND role = 'admin'
-    ) THEN
+    -- Verificar se o usuário atual é admin via claim JWT 'user_role'
+    IF NOT ((auth.jwt() ->> 'user_role') = 'admin') THEN
         RAISE EXCEPTION 'Acesso negado: apenas administradores podem executar esta função';
     END IF;
 

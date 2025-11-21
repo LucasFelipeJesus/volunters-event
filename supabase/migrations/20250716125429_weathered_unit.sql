@@ -216,8 +216,7 @@ CREATE POLICY "Admins can create events"
     )
   );
 
--- Políticas para teams
-CREATE POLICY "Team members can read their teams"
+DROP POLICY IF EXISTS "Users can read their team memberships" ON team_members;
   ON teams
   FOR SELECT
   TO authenticated
@@ -231,6 +230,7 @@ CREATE POLICY "Team members can read their teams"
     EXISTS (
       SELECT 1 FROM users 
       WHERE users.id = auth.uid() 
+DROP POLICY IF EXISTS "Admins can manage team members" ON team_members;
       AND users.role = 'admin'
     )
   );
@@ -248,11 +248,13 @@ CREATE POLICY "Admins can manage teams"
   );
 
 -- Políticas para team_members
+DROP POLICY IF EXISTS "Everyone can read published events" ON events;
 CREATE POLICY "Users can read their team memberships"
   ON team_members
   FOR SELECT
   TO authenticated
   USING (
+DROP POLICY IF EXISTS "Admins can manage all events" ON events;
     user_id = auth.uid()
     OR 
     EXISTS (
@@ -264,6 +266,7 @@ CREATE POLICY "Users can read their team memberships"
 
 CREATE POLICY "Admins can manage team members"
   ON team_members
+DROP POLICY IF EXISTS "Admins can create events" ON events;
   FOR ALL
   TO authenticated
   USING (
@@ -281,6 +284,7 @@ CREATE POLICY "Users can leave teams"
   USING (user_id = auth.uid());
 
 -- Políticas para evaluations
+DROP POLICY IF EXISTS "Team members can read their teams" ON teams;
 CREATE POLICY "Volunteers can read their evaluations"
   ON evaluations
   FOR SELECT
@@ -298,6 +302,7 @@ CREATE POLICY "Volunteers can read their evaluations"
 
 CREATE POLICY "Captains can create evaluations"
   ON evaluations
+DROP POLICY IF EXISTS "Admins can manage teams" ON teams;
   FOR INSERT
   TO authenticated
   WITH CHECK (
@@ -369,21 +374,25 @@ CREATE POLICY "Admins can update captain evaluations"
   );
 
 -- Políticas para notifications
+DROP POLICY IF EXISTS "Users can read own profile" ON users;
 CREATE POLICY "Users can read own notifications"
   ON notifications
   FOR SELECT
   TO authenticated
   USING (user_id = auth.uid());
+DROP POLICY IF EXISTS "Users can update own profile" ON users;
 
 CREATE POLICY "Users can update own notifications"
   ON notifications
   FOR UPDATE
   TO authenticated
+DROP POLICY IF EXISTS "Users can insert own profile" ON users;
   USING (user_id = auth.uid());
 
 CREATE POLICY "System can create notifications"
   ON notifications
   FOR INSERT
+DROP POLICY IF EXISTS "Admins can read all users" ON users;
   TO authenticated
   WITH CHECK (true);
 
@@ -395,6 +404,7 @@ BEGIN
   RETURN NEW;
 END;
 $$ language 'plpgsql';
+DROP POLICY IF EXISTS "Admins can update user roles" ON users;
 
 -- Triggers para updated_at
 CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users FOR EACH ROW EXECUTE PROCEDURE update_updated_at_column();
