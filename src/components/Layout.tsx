@@ -13,6 +13,8 @@ import {
 } from 'lucide-react'
 import { useState } from 'react'
 import NotificationsPanel from './NotificationsPanel'
+import { displayRole } from '../utils/roleUtils'
+import { getRoleEmoji } from '../utils/roleUtils'
 
 export const Layout: React.FC = () => {
   const { user, signOut } = useAuth()
@@ -86,7 +88,7 @@ export const Layout: React.FC = () => {
                   <NotificationsPanel />
                   <div className="text-right">
                     <p className="text-sm font-medium text-gray-900">{user?.full_name}</p>
-                    <p className="text-xs text-gray-500 capitalize">{user?.role}</p>
+                  <p className="text-xs text-gray-500 capitalize">{getRoleEmoji(user?.role)} {displayRole(user?.role)}</p>
                   </div>
                   <button
                     onClick={handleSignOut}

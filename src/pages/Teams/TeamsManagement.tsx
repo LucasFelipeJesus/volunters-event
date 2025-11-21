@@ -10,8 +10,10 @@ import {
     User,
     Edit,
     Trash2,
-    Filter
+    Filter,
+    Eye
 } from 'lucide-react'
+import ViewTeamModal from '../../components/ViewTeamModal'
 
 interface Team {
     id: string
@@ -47,6 +49,7 @@ interface Team {
 export const TeamsManagement: React.FC = () => {
     const navigate = useNavigate();
     const { user } = useAuth()
+    const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null)
     const [teams, setTeams] = useState<Team[]>([])
     const [loading, setLoading] = useState(true)
     const [filter, setFilter] = useState({
@@ -396,6 +399,13 @@ export const TeamsManagement: React.FC = () => {
 
                                     <div className="flex items-center space-x-2 ml-4">
                                         <button
+                                            onClick={() => setSelectedTeamId(team.id)}
+                                            className="p-2 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                            title="Ver equipe"
+                                        >
+                                            <Eye className="w-4 h-4" />
+                                        </button>
+                                        <button
                                             onClick={() => {
                                                 if (team.event?.status === 'completed') {
                                                     alert('Não é possível editar equipes de eventos finalizados.');
@@ -428,6 +438,9 @@ export const TeamsManagement: React.FC = () => {
                     </div>
                 )}
             </div>
+            {selectedTeamId && (
+                <ViewTeamModal teamId={selectedTeamId} open={!!selectedTeamId} onClose={() => setSelectedTeamId(null)} />
+            )}
         </div>
     )
 }
