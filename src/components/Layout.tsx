@@ -31,9 +31,11 @@ export const Layout: React.FC = () => {
     }
   }
 
+  const defaultDashboardHref = user?.role === 'captain' ? '/captain' : user?.role === 'volunteer' ? '/volunteer' : '/'
+
   const navigation = [
-    { name: 'Dashboard', href: '/', icon: Home },
-    ...(user?.role === 'volunteer' ? [{ name: 'Meu Painel', href: '/volunteer', icon: User }] : []),
+    { name: 'Dashboard', href: defaultDashboardHref, icon: Home },
+    ...(user?.role === 'volunteer' ? [{ name: 'Avaliar Capitães', href: '/volunteer/avaliar-capitao', icon: Users }] : []),
     ...(user?.role === 'captain' ? [{ name: 'Avaliar Equipe', href: '/captain/avaliar-equipe', icon: Users }] : []),
     ...(user?.role === 'admin' ? [{ name: 'Eventos', href: '/events', icon: Calendar }] : []),
     ...(user?.role === 'admin' ? [{ name: 'Equipes', href: '/teams', icon: Users }] : []),
