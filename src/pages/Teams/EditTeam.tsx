@@ -8,6 +8,7 @@ interface UserProfile {
 }
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
+import { notificationService } from '../../lib/services'
 import { useAuth } from '../../hooks/useAuth'
 import {
   ArrowLeft,
@@ -160,6 +161,20 @@ export const EditTeam: React.FC = () => {
             status: 'active',
             joined_at: new Date().toISOString()
           });
+      }
+      // Criar notificação para o voluntário alocado
+      try {
+        await notificationService.createNotification({
+          user_id: selectedVolunteerId,
+          title: `Você foi alocado na equipe ${team.name}`,
+          message: `Você foi incluído na equipe ${team.name} do evento ${team.event?.title || ''}. Veja os detalhes na aba de notificações.`,
+          type: 'info',
+          related_event_id: team.event_id,
+          related_team_id: team.id,
+          read: false
+        })
+      } catch (err) {
+        console.error('Erro ao criar notificação de alocação:', err)
       }
       setSuccess('Voluntário adicionado à equipe!');
       setSelectedVolunteerId('');

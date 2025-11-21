@@ -12,6 +12,7 @@ import {
   UserCog
 } from 'lucide-react'
 import { useState } from 'react'
+import NotificationsPanel from './NotificationsPanel'
 
 export const Layout: React.FC = () => {
   const { user, signOut } = useAuth()
@@ -82,18 +83,19 @@ export const Layout: React.FC = () => {
             {/* User Menu */}
             <div className="flex items-center space-x-4">
               <div className="hidden md:flex items-center space-x-3">
-                <div className="text-right">
-                  <p className="text-sm font-medium text-gray-900">{user?.full_name}</p>
-                  <p className="text-xs text-gray-500 capitalize">{user?.role}</p>
+                  <NotificationsPanel />
+                  <div className="text-right">
+                    <p className="text-sm font-medium text-gray-900">{user?.full_name}</p>
+                    <p className="text-xs text-gray-500 capitalize">{user?.role}</p>
+                  </div>
+                  <button
+                    onClick={handleSignOut}
+                    className="p-2 text-gray-600 hover:text-gray-900 transition-colors"
+                    title="Sair"
+                  >
+                    <LogOut className="w-5 h-5" />
+                  </button>
                 </div>
-                <button
-                  onClick={handleSignOut}
-                  className="p-2 text-gray-600 hover:text-gray-900 transition-colors"
-                  title="Sair"
-                >
-                  <LogOut className="w-5 h-5" />
-                </button>
-              </div>
 
               {/* Mobile menu button */}
               <button
