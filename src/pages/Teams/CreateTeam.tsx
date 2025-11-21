@@ -108,10 +108,11 @@ export const CreateTeam: React.FC = () => {
                     throw regsError
                 }
 
-                // Extrair apenas os usuários ativos com role 'volunteer' ou 'captain'
+                // Extrair apenas os usuários ativos com role 'volunteer'
+                // Capitães não devem aparecer na lista de voluntários disponíveis
                 const allVolunteersData = (registrationsData || [])
                     .map((r: any) => r.user)
-                    .filter((u: any) => u && (u.role === 'volunteer' || u.role === 'captain') && u.is_active)
+                    .filter((u: any) => u && u.role === 'volunteer' && u.is_active)
 
                 // Extrair capitães inscritos neste evento (para preencher a seleção de capitão)
                 const captainsFromRegs = (registrationsData || [])
@@ -214,7 +215,9 @@ export const CreateTeam: React.FC = () => {
             newErrors.max_volunteers = 'Número de voluntários deve ser entre 1 e 20'
         }
 
-        if (selectedVolunteers.length === 0) {
+        // Permitir criar equipe com apenas o capitão (sem voluntários selecionados)
+        // porque agora capitães não aparecem na lista de voluntários disponíveis.
+        if (selectedVolunteers.length === 0 && !formData.captain_id) {
             newErrors.volunteers = 'Selecione pelo menos um voluntário'
         }
 

@@ -80,12 +80,23 @@ export const EditTeam: React.FC = () => {
   useEffect(() => {
     const fetchAvailableVolunteers = async () => {
       if (!team?.event_id) return;
-      // Buscar todos voluntários e capitães ativos (participantes do evento)
-      const { data: allVolunteers } = await supabase
-        .from('users')
-        .select('id, full_name, email, role')
-        .in('role', ['volunteer', 'captain'])
-        .eq('is_active', true);
+      // Buscar apenas usuários que se inscreveram neste evento (event_registrations)
+      // Consideramos status 'confirmed' e 'pending' como inscritos.
+      const { data: registrationsData, error: regsError } = await supabase
+        .from('event_registrations')
+        .select('user:users(id, full_name, email, role, is_active), status')
+        .eq('event_id', team.event_id)
+        .in('status', ['confirmed', 'pending'])
+
+      if (regsError) {
+        console.error('Erro ao buscar inscrições do evento:', regsError)
+      }
+
+      // Extrair apenas os usuários ativos com role 'volunteer'
+      // Capitães não devem aparecer na lista de voluntários disponíveis
+      const allVolunteers = (registrationsData || [])
+        .map((r: any) => r.user)
+        .filter((u: any) => u && u.role === 'volunteer' && u.is_active)
 
       // Buscar IDs das equipes deste evento
       const { data: eventTeams } = await supabase
