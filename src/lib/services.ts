@@ -2,6 +2,7 @@
 import { supabase } from './supabase';
 import { logSupabaseError, SuccessMessages } from './errorHandling';
 import logger from './logger'
+import type { PostgrestError } from '@supabase/supabase-js'
 import type {
     User,
     Event,
@@ -616,6 +617,7 @@ export const notificationService = {
     async getUserNotifications(userId: string, limit = 50): Promise<Notification[]> {
         try {
             // Query simplificada para evitar erros de sintaxe
+            // Buscar notificações primeiro (evita ambiguidade de relacionamentos no PostgREST)
             const { data, error } = await supabase
                 .from('notifications')
                 .select('*')
@@ -635,7 +637,32 @@ export const notificationService = {
                 return []
             }
 
-            return data || []
+            const notificationsData: Notification[] = (data as Notification[]) || []
+
+            // Se houver related_user_id, carregar os usuários relacionados em batch
+            const relatedUserIds = Array.from(new Set(notificationsData.map(n => n.related_user_id).filter(Boolean))) as string[]
+            if (relatedUserIds.length > 0) {
+                const { data: usersData, error: usersErr } = await supabase
+                    .from('users')
+                    .select('id, full_name, phone, profile_image_url, avatar_url')
+                    .in('id', relatedUserIds)
+
+                if (usersErr) {
+                    console.warn('[NOTIFICATIONS] Erro ao carregar usuários relacionados:', usersErr)
+                } else if (usersData && Array.isArray(usersData)) {
+                    type UserSummary = { id: string; full_name: string; phone: string; profile_image_url: string; avatar_url: string }
+                    const usersMap = new Map((usersData as UserSummary[]).map((u: UserSummary) => [u.id, u]))
+                    // Anexar related_user em cada notificação quando disponível
+                    for (const n of notificationsData) {
+                        if (n.related_user_id) {
+                            // @ts-expect-error: Notification type does not include related_user, but we attach it dynamically here for convenience
+                            n.related_user = usersMap.get(n.related_user_id) || null
+                        }
+                    }
+                }
+            }
+
+            return notificationsData
         } catch (error) {
             console.error('❌ [NOTIFICATIONS] Erro inesperado:', error)
             return []
@@ -658,31 +685,135 @@ export const notificationService = {
 
     // Marcar todas as notificações como lidas
     async markAllAsRead(userId: string): Promise<boolean> {
-        const { error } = await supabase
-            .from('notifications')
-            .update({ read: true })
-            .eq('user_id', userId)
-            .eq('read', false)
+        try {
+            // Tentar RPC segura primeiro (evita problemas com RLS)
+            const { error: rpcErr } = await supabase.rpc('mark_all_notifications_read', { p_user_id: userId }) as { error?: { code?: string; message?: string } };
+            if (rpcErr) {
+                console.warn('[NOTIFICATIONS] RPC mark_all_notifications_read falhou, tentando update direto:', rpcErr)
+                const { error } = await supabase
+                    .from('notifications')
+                    .update({ read: true })
+                    .eq('user_id', userId)
+                    .eq('read', false)
 
-        if (error) {
-            console.error('Erro ao marcar todas as notificações como lidas:', error)
+                if (error) {
+                    console.error('Erro ao marcar todas as notificações como lidas (fallback):', error)
+                    return false
+                }
+                return true
+            }
+
+            // RPC executada com sucesso (rpcData contém o número de linhas atualizadas)
+            return true
+        } catch (err) {
+            console.error('Erro inesperado ao marcar todas as notificações como lidas:', err)
             return false
         }
-        return true
     },
 
-    // Criar notificação
+    // Criar notificação: tenta usar RPC segura 'create_notification_rpc' e faz fallback para insert
     async createNotification(notification: Omit<Notification, 'id' | 'created_at'>): Promise<boolean> {
-        const { error } = await supabase
-            .from('notifications')
-            .insert(notification)
+        try {
+            // Primeiro, tente usar a RPC (recomendada quando RLS impede inserts diretos)
+            const { error: rpcErr } = await supabase.rpc('create_notification_rpc', {
+                p_user_id: notification.user_id,
+                p_title: notification.title,
+                p_message: notification.message,
+                p_related_user_id: notification.related_user_id ?? null,
+                p_related_team_id: notification.related_team_id ?? null
+            }) as { error: PostgrestError | null }
 
-        if (error) {
-            console.error('Erro ao criar notificação:', error)
+            if (rpcErr) {
+                // Se a RPC não existe ou falhou por outro motivo, log e tentar fallback
+                console.warn('[NOTIFICATIONS] RPC create_notification_rpc retornou erro, tentando fallback insert:', rpcErr)
+
+                // Se a função não existe (PGRST202) ou erro de rpc, tentar insert direto (pode falhar por RLS)
+                const { error: insertErr } = await supabase.from('notifications').insert(notification)
+                if (insertErr) {
+                    console.error('Erro ao criar notificação via insert (fallback):', insertErr)
+                    return false
+                }
+                return true
+            }
+
+            // RPC executada com sucesso
+            return true
+        } catch (err) {
+            console.error('Erro inesperado ao criar notificação:', err)
             return false
         }
-        return true
-    }
+    },
+
+    // Notificar todos os administradores
+    async notifyAdmins(payload: { title: string; message: string; type?: 'info' | 'success' | 'warning' | 'error' | 'evaluation'; related_event_id?: string; related_user_id?: string; related_team_id?: string; }): Promise<boolean> {
+        try {
+            const { data: adminsData, error } = await supabase
+                .from('users')
+                .select('id')
+                .eq('role', 'admin')
+                .eq('is_active', true)
+
+            if (error) {
+                console.error('[NOTIFICATIONS] Erro ao buscar administradores:', error)
+                return false
+            }
+
+            let adminList: { id: string }[] = (adminsData as Array<{ id: string }>) || [];
+
+            if (!adminList || adminList.length === 0) {
+                console.info('[NOTIFICATIONS] Nenhum administrador encontrado por select direto. Tentando RPC get_admin_ids como fallback...')
+                try {
+                    const { data: adminRpcData, error: rpcErr } = await supabase.rpc('get_admin_ids');
+                    if (rpcErr) {
+                        console.warn('[NOTIFICATIONS] RPC get_admin_ids falhou:', rpcErr);
+                    } else if (adminRpcData && Array.isArray(adminRpcData) && adminRpcData.length > 0) {
+                        const rpcAdmins: { id: string }[] = (adminRpcData as Array<{ id: string }>);
+                        adminList = rpcAdmins;
+                        console.info('[NOTIFICATIONS] Fallback RPC retornou admins:', rpcAdmins.map(a => a.id).join(', '));
+                    } else {
+                        console.info('[NOTIFICATIONS] Nenhum administrador encontrado via RPC também')
+                        return true
+                    }
+                } catch (e) {
+                    console.error('[NOTIFICATIONS] Erro ao chamar RPC get_admin_ids:', e)
+                    return true
+                }
+            }
+
+            // Enviar notificações para cada admin (sequencialmente para melhor logging)
+            console.info('[NOTIFICATIONS] Enviando notificações para administradores:', adminList.map(a => a.id).join(', '))
+            const failures: Array<{ adminId: string; error?: unknown }> = []
+            for (const a of adminList) {
+                try {
+                    const ok = await this.createNotification({
+                        user_id: a.id,
+                        title: payload.title,
+                        message: payload.message,
+                        type: payload.type || 'info',
+                        related_user_id: payload.related_user_id,
+                        related_event_id: payload.related_event_id,
+                        related_team_id: payload.related_team_id,
+                        read: false
+                    })
+                    if (!ok) failures.push({ adminId: a.id })
+                } catch (e) {
+                    failures.push({ adminId: a.id, error: e })
+                }
+            }
+
+            if (failures.length > 0) {
+                console.error('[NOTIFICATIONS] Falha ao enviar notificações para alguns administradores:', failures)
+                return false
+            }
+            console.info('[NOTIFICATIONS] Notificações enviadas com sucesso para todos os administradores')
+            return true
+        } catch (err) {
+            console.error('[NOTIFICATIONS] Erro ao notificar administradores:', err)
+            return false
+        }
+    },
+
+    // (Removido) Lógica de notificações sobre voluntários não alocados temporariamente desativada.
 }
 
 // Services para autenticação

@@ -5,6 +5,7 @@ import { supabase } from '../../lib/supabase'
 import { EventTermsModal } from '../../components/EventTermsModal'
 import { ViewEventTermsModal } from '../../components/ViewEventTermsModal'
 import logger from '../../lib/logger'
+import { notificationService } from '../../lib/services'
 import { QuestionWithOptions, UserFormResponse } from '../../types/termsForm'
 import {
     Calendar,
@@ -196,12 +197,12 @@ export const CaptainDashboard: React.FC = () => {
             const allParticipations = [...processedRegistrations, ...processedParticipations, ...teamsAsCaptainParticipations];
             const uniqueParticipations = new Map<string, MyParticipation>();
             const getPriority = (p: MyParticipation) => (p.role_in_team === 'captain' ? 3 : p.team.name !== 'Inscrição Direta' ? 2 : 1);
-            allParticipations.forEach(p => {
+            for (const p of allParticipations) {
                 const eventId = p.team?.event?.id;
                 if (eventId && (!uniqueParticipations.has(eventId) || getPriority(p) > getPriority(uniqueParticipations.get(eventId)!))) {
                     uniqueParticipations.set(eventId, p);
                 }
-            });
+            }
             const finalParticipations = Array.from(uniqueParticipations.values()).sort((a, b) => (b.team.event.event_date || '').localeCompare(a.team.event.event_date || ''));
             setMyParticipations(finalParticipations);
 
@@ -343,10 +344,31 @@ export const CaptainDashboard: React.FC = () => {
                 const { error } = await supabase.from('event_registrations').update({ status: 'confirmed', terms_accepted: true, terms_accepted_at: new Date().toISOString() }).eq('id', existingRegistration.id);
                 if (error) throw error;
                 alert(`Sua inscrição no evento "${eventInfo.title}" foi reativada com sucesso!`);
+                // Notificar administradores sobre reativação/inscrição confirmada
+                try {
+                    await notificationService.notifyAdmins({
+                        title: `Inscrição confirmada: ${eventInfo.title}`,
+                        message: `${user?.full_name} reativou/confirmou inscrição no evento "${eventInfo.title}".`,
+                        related_event_id: eventId,
+                        related_user_id: user?.id
+                    });
+                } catch (e) {
+                    console.warn('Falha ao notificar administradores sobre inscrição confirmada (reactivate):', e);
+                }
             } else {
                 const { error } = await supabase.from('event_registrations').insert({ event_id: eventId, user_id: user!.id, status: 'confirmed', terms_accepted: true, terms_accepted_at: new Date().toISOString() });
                 if (error) throw error;
                 alert(`Você foi inscrito com sucesso no evento "${eventInfo.title}"!`);
+                try {
+                    await notificationService.notifyAdmins({
+                        title: `Inscrição confirmada: ${eventInfo.title}`,
+                        message: `${user?.full_name} confirmou inscrição no evento "${eventInfo.title}".`,
+                        related_event_id: eventId,
+                        related_user_id: user?.id
+                    });
+                } catch (e) {
+                    console.warn('Falha ao notificar administradores sobre inscrição confirmada:', e);
+                }
             }
             await fetchVolunteerData();
         } catch (err) {
@@ -470,6 +492,16 @@ export const CaptainDashboard: React.FC = () => {
             const { error } = await supabase.from('event_registrations').update({ status: 'cancelled', terms_accepted: false, terms_accepted_at: null }).eq('event_id', eventId).eq('user_id', user!.id);
             if (error) throw error;
             alert('Inscrição cancelada com sucesso!');
+            try {
+                await notificationService.notifyAdmins({
+                    title: `Inscrição cancelada: ${eventTitle}`,
+                    message: `${user?.full_name} cancelou a inscrição no evento "${eventTitle}".`,
+                    related_event_id: eventId,
+                    related_user_id: user?.id
+                });
+            } catch (e) {
+                console.warn('Falha ao notificar administradores sobre cancelamento de inscrição:', e);
+            }
             await fetchVolunteerData();
         } catch (error) {
             logger.error('Erro ao cancelar inscrição:', error);

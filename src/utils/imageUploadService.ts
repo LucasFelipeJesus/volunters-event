@@ -48,18 +48,29 @@ export class ImageUploadService {
      * Verifica se um bucket existe no Supabase Storage
      */
     static async verifyBucket(bucketId: string): Promise<void> {
-        const { data: buckets, error } = await supabase.storage.listBuckets()
+        try {
+            const { data: buckets, error } = await supabase.storage.listBuckets()
 
-        if (error) {
-            console.error('Erro ao listar buckets:', error)
-            throw new Error('Erro ao verificar buckets de storage')
-        }
+            // `listBuckets` normalmente requer uma chave com privilégios (service_role).
+            // Quando a aplicação roda no cliente (chave anônima), a chamada pode falhar
+            // — não queremos bloquear o upload apenas por isso, então apenas logamos
+            // e permitimos que o fluxo de upload continue.
+            if (error) {
+                logger.warn('Não foi possível listar buckets (provavelmente chave anônima). Ignorando verificação.', error)
+                return
+            }
 
-        const bucket = buckets?.find(b => b.id === bucketId)
-        if (!bucket) {
-            const availableBuckets = buckets?.map(b => b.id).join(', ') || 'nenhum'
-            console.error(`Bucket ${bucketId} não encontrado. Buckets disponíveis:`, availableBuckets)
-            throw new Error(`Bucket '${bucketId}' não configurado. Entre em contato com o administrador.`)
+            const bucket = buckets?.find(b => b.id === bucketId)
+            if (!bucket) {
+                const availableBuckets = buckets?.map(b => b.id).join(', ') || 'nenhum'
+                logger.error(`Bucket ${bucketId} não encontrado. Buckets disponíveis: ${availableBuckets}`)
+                throw new Error(`Bucket '${bucketId}' não configurado. Entre em contato com o administrador.`)
+            }
+        } catch (err) {
+            // Em caso de erro inesperado, registrar e continuar — melhor permitir
+            // que o upload tente seguir e falhe com o erro real do Supabase na operação.
+            logger.warn('Erro ao verificar buckets de storage (ignorado):', err)
+            return
         }
     }
 

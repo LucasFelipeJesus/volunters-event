@@ -204,20 +204,8 @@ export const EventDetails: React.FC = () => {
 
             console.log('Tentando fazer upload da imagem do evento:', fileName)
 
-            // Verificar se o bucket existe antes de fazer upload
-            const { data: buckets, error: bucketsError } = await supabase.storage.listBuckets()
-
-            if (bucketsError) {
-                console.error('Erro ao listar buckets:', bucketsError)
-                throw new Error('Erro ao verificar buckets de storage')
-            }
-
-            const eventImagesBucket = buckets?.find(bucket => bucket.id === 'event-images')
-            if (!eventImagesBucket) {
-                console.error('Bucket event-images não encontrado. Buckets disponíveis:', buckets?.map(b => b.id))
-                throw new Error('Bucket de imagens de eventos não configurado. Entre em contato com o administrador.')
-            }
-
+            // Tentar upload diretamente; listagem de buckets no cliente pode falhar
+            // quando usamos a chave anônima. Se houver erro, será capturado abaixo.
             const { data, error } = await supabase.storage
                 .from('event-images')
                 .upload(fileName, file, {

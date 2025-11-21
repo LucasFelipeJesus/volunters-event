@@ -149,6 +149,8 @@ export interface Notification {
   type: 'info' | 'success' | 'warning' | 'error' | 'evaluation'
   related_event_id?: string
   related_team_id?: string
+  related_user_id?: string
+  related_user?: User
   read: boolean
   created_at: string
   related_event?: Event
