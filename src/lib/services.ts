@@ -1,6 +1,7 @@
 
 import { supabase } from './supabase';
 import { logSupabaseError, SuccessMessages } from './errorHandling';
+import logger from './logger'
 import type {
     User,
     Event,
@@ -35,7 +36,7 @@ export const userService = {
     // Obter perfil do usuário
     async getProfile(userId: string): Promise<User | null> {
         try {
-            console.log('🔍 [userService] Iniciando busca do perfil para userId:', userId)
+            logger.debug('[userService] Iniciando busca do perfil para userId:', userId)
 
             // Adicionar timeout menor para detectar problemas RLS mais rapidamente
             const timeoutPromise = new Promise((_, reject) => {
@@ -48,17 +49,17 @@ export const userService = {
                 .eq('id', userId)
                 .single()
 
-            console.log('⏰ [userService] Executando query com timeout de 5s...')
+            logger.debug('[userService] Executando query com timeout de 5s...')
             const result = await Promise.race([queryPromise, timeoutPromise])
 
             // Type guard para verificar se é uma resposta do Supabase
             if (result && typeof result === 'object' && 'data' in result) {
                 const { data, error } = result as { data: User | null; error: Error | null }
 
-                console.log('📊 [userService] Resposta da query:', { data: !!data, error: !!error })
+                logger.debug('[userService] Resposta da query:', { data: !!data, error: !!error })
 
                 if (error) {
-                    console.error('❌ [userService] Erro na query:', error)
+                    logger.error('[userService] Erro na query:', error)
 
                     // Não fazer log de erro se for timeout RLS (evita spam)
                     if (!error.message?.includes('TIMEOUT_RLS')) {
@@ -67,17 +68,17 @@ export const userService = {
 
                     // Adicionar diagnóstico específico para problemas comuns
                     if ('code' in error && error.code === 'PGRST116') {
-                        console.error('💡 Erro PGRST116: Nenhum resultado encontrado. O usuário pode não existir na tabela users.')
+                        logger.info('Erro PGRST116: Nenhum resultado encontrado. O usuário pode não existir na tabela users.')
                     }
                     if (error.message?.includes('permission denied')) {
-                        console.error('💡 Permissão negada: Verifique as políticas RLS da tabela users.')
+                        logger.info('Permissão negada: Verifique as políticas RLS da tabela users.')
                     }
 
                     return null
                 }
 
-                console.log('✅ [userService] Perfil encontrado:', data?.email || 'email não definido')
-                console.log(SuccessMessages.USER_UPDATED.replace('atualizado', 'carregado'), data?.email)
+                logger.info('[userService] Perfil encontrado:', data?.email || 'email não definido')
+                logger.info(SuccessMessages.USER_UPDATED.replace('atualizado', 'carregado'), data?.email)
                 return data
             }
 
@@ -85,12 +86,12 @@ export const userService = {
             throw new Error('TIMEOUT_RLS_DETECTED')
 
         } catch (error) {
-            console.error('❌ [userService] Erro inesperado ao buscar perfil:', error)
+            logger.error('[userService] Erro inesperado ao buscar perfil:', error)
 
             // Detectar timeout RLS específico
             if (error instanceof Error && error.message === 'TIMEOUT_RLS_DETECTED') {
-                console.error('🔄 [RLS] TIMEOUT detectado - Problema nas políticas RLS!')
-                console.error('💡 [RLS] Execute fix_profile_creation.sql para corrigir')
+                logger.error('[RLS] TIMEOUT detectado - Problema nas políticas RLS!')
+                logger.info('[RLS] Execute fix_profile_creation.sql para corrigir')
                 throw new Error('Timeout RLS - Execute correção SQL')
             }
 
@@ -111,10 +112,10 @@ export const userService = {
                 return false
             }
 
-            console.log(SuccessMessages.USER_UPDATED, userId)
+            logger.info(SuccessMessages.USER_UPDATED, userId)
             return true
         } catch (error) {
-            console.error('❌ Erro inesperado ao atualizar perfil:', error)
+            logger.error('Erro inesperado ao atualizar perfil:', error)
             return false
         }
     },
@@ -129,7 +130,7 @@ export const userService = {
                 .order('event_date', { ascending: false })
 
             if (error) {
-                console.error('❌ Erro ao buscar histórico de eventos:', {
+                logger.error('Erro ao buscar histórico de eventos:', {
                     userId,
                     code: error.code,
                     message: error.message
@@ -137,10 +138,10 @@ export const userService = {
                 return []
             }
 
-            console.log(`📅 ${data?.length || 0} eventos encontrados no histórico`)
+            logger.info(`Eventos encontrados no histórico: ${data?.length || 0}`)
             return data || []
         } catch (error) {
-            console.error('❌ Erro inesperado ao buscar histórico:', error)
+            logger.error('Erro inesperado ao buscar histórico:', error)
             return []
         }
     },
@@ -153,9 +154,9 @@ export const userService = {
 
             if (error) {
                 if (error.code === 'PGRST202') {
-                    console.warn('📊 Função get_user_stats não encontrada - verifique se a migration foi aplicada')
+                    logger.warn('Função get_user_stats não encontrada - verifique se a migration foi aplicada')
                 } else {
-                    console.error('❌ Erro ao buscar estatísticas do usuário:', {
+                    logger.error('Erro ao buscar estatísticas do usuário:', {
                         userId,
                         code: error.code,
                         message: error.message
@@ -164,10 +165,10 @@ export const userService = {
                 return null
             }
 
-            console.log('✅ Estatísticas carregadas com sucesso')
+            logger.info('Estatísticas carregadas com sucesso')
             return data
         } catch (error) {
-            console.error('❌ Erro inesperado ao buscar estatísticas:', error)
+            logger.error('Erro inesperado ao buscar estatísticas:', error)
             return null
         }
     },
@@ -183,11 +184,11 @@ export const userService = {
 
             if (error) {
                 if (error.code === 'PGRST202') {
-                    console.error('❌ Função leave_team não encontrada - verifique se a migration foi aplicada')
+                    logger.error('Função leave_team não encontrada - verifique se a migration foi aplicada')
                 } else if (error.code === 'P0001') {
-                    console.error('❌ Usuário não é membro desta equipe')
+                    logger.error('Usuário não é membro desta equipe')
                 } else {
-                    console.error('❌ Erro ao sair da equipe:', {
+                    logger.error('Erro ao sair da equipe:', {
                         userId,
                         teamId,
                         code: error.code,
@@ -197,10 +198,10 @@ export const userService = {
                 return false
             }
 
-            console.log('✅ Usuário saiu da equipe com sucesso')
+            logger.info('Usuário saiu da equipe com sucesso')
             return data
         } catch (error) {
-            console.error('❌ Erro inesperado ao sair da equipe:', error)
+            logger.error('Erro inesperado ao sair da equipe:', error)
             return false
         }
     },
@@ -211,7 +212,7 @@ export const userService = {
             .rpc('delete_user_account', { user_id_param: userId })
 
         if (error) {
-            console.error('Erro ao deletar conta:', error)
+            logger.error('Erro ao deletar conta:', error)
             return false
         }
         return data
@@ -226,7 +227,7 @@ export const userService = {
             .order('created_at', { ascending: false })
 
         if (error) {
-            console.error('Erro ao buscar usuários:', error)
+            logger.error('Erro ao buscar usuários:', error)
             return []
         }
         return data || []
@@ -240,11 +241,11 @@ export const userService = {
 
             if (error) {
                 if (error.code === 'PGRST202') {
-                    console.error('❌ Função promote_to_captain não encontrada - verifique se a migration foi aplicada')
+                    logger.error('Função promote_to_captain não encontrada - verifique se a migration foi aplicada')
                 } else if (error.code === 'P0001') {
-                    console.error('❌ Usuário já é capitão ou admin')
+                    logger.error('Usuário já é capitão ou admin')
                 } else {
-                    console.error('❌ Erro ao promover usuário a capitão:', {
+                    logger.error('Erro ao promover usuário a capitão:', {
                         userId,
                         code: error.code,
                         message: error.message
@@ -253,10 +254,10 @@ export const userService = {
                 return false
             }
 
-            console.log('👑 Usuário promovido a capitão com sucesso:', userId)
+            logger.info('Usuário promovido a capitão com sucesso:', userId)
             return data
         } catch (error) {
-            console.error('❌ Erro inesperado ao promover usuário:', error)
+            logger.error('Erro inesperado ao promover usuário:', error)
             return false
         }
     },
@@ -272,7 +273,7 @@ export const userService = {
                 .select()
 
             if (error) {
-                console.error('❌ Erro ao demover usuário:', {
+                logger.error('Erro ao demover usuário:', {
                     userId,
                     code: error.code,
                     message: error.message
@@ -281,14 +282,14 @@ export const userService = {
             }
 
             if (!data || data.length === 0) {
-                console.error('❌ Usuário não encontrado ou não é capitão:', userId)
+                logger.error('Usuário não encontrado ou não é capitão:', userId)
                 return false
             }
 
-            console.log('📉 Usuário demovido a voluntário com sucesso:', userId)
+            logger.info('Usuário demovido a voluntário com sucesso:', userId)
             return true
         } catch (error) {
-            console.error('❌ Erro inesperado ao demover usuário:', error)
+            logger.error('Erro inesperado ao demover usuário:', error)
             return false
         }
     },
@@ -306,12 +307,12 @@ export const userService = {
                 .eq('event_id', eventId)
 
             if (teamsError) {
-                console.error('❌ Erro ao buscar equipes do evento:', teamsError)
+                logger.error('Erro ao buscar equipes do evento:', teamsError)
                 return 0
             }
 
             if (!teams || teams.length === 0) {
-                console.log('ℹ️ Nenhuma equipe encontrada para o evento:', eventId)
+                logger.info('Nenhuma equipe encontrada para o evento:', eventId)
                 return 0
             }
 
@@ -324,7 +325,7 @@ export const userService = {
                 .map(team => team.captain_id)
 
             if (captainsTodemote.length === 0) {
-                console.log('ℹ️ Nenhum capitão para demover no evento:', eventId)
+                logger.info('Nenhum capitão para demover no evento:', eventId)
                 return 0
             }
 
@@ -337,15 +338,15 @@ export const userService = {
                 .select()
 
             if (error) {
-                console.error('❌ Erro ao demover capitães em lote:', error)
+                logger.error('Erro ao demover capitães em lote:', error)
                 return 0
             }
 
             const demotedCount = data?.length || 0
-            console.log(`📉 ${demotedCount} capitães demovidos após finalização do evento:`, eventId)
+            logger.info(`Capitães demovidos após finalização do evento: ${demotedCount}`, eventId)
             return demotedCount
         } catch (error) {
-            console.error('❌ Erro inesperado ao demover capitães:', error)
+            logger.error('Erro inesperado ao demover capitães:', error)
             return 0
         }
     }
@@ -781,18 +782,24 @@ export const authService = {
                 })
 
             if (error) {
-                logSupabaseError(error, 'Configurar perfil de administrador', { userId, email })
+                // Log formatado e retorno falso para o chamador
+                const formatted = logSupabaseError(error, 'Configurar perfil de administrador', { userId, email })
+                console.error('❌ setupAdminProfile RPC error details:', formatted)
                 return false
             }
 
-            if (data) {
-                console.log(SuccessMessages.ADMIN_SETUP, email)
-                console.log('🔑 O usuário agora possui privilégios de administrador')
-            } else {
-                console.error('❌ Falha na configuração do administrador')
+            if (!data) {
+                // RPC não retornou erro, mas retornou falsy (ex: função retornou false)
+                console.error('❌ Falha na configuração do administrador: a função RPC `setup_admin_profile` retornou falso ou nulo.')
+                console.error('💡 Verifique se a migration que cria `setup_admin_profile` foi aplicada no Supabase.')
+                console.error('💡 Arquivo possível: supabase/migrations/SETUP_COMPLETO_DO_ZERO.sql')
+                return false
             }
 
-            return data
+            // Sucesso
+            console.log(SuccessMessages.ADMIN_SETUP, email)
+            console.log('🔑 O usuário agora possui privilégios de administrador')
+            return true
         } catch (error) {
             console.error('❌ Erro inesperado ao configurar admin:', error)
             return false

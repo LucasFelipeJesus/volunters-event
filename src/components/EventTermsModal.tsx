@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { X, FileText, AlertCircle } from 'lucide-react'
 import { TermsQuestionsForm } from './TermsQuestionsForm'
 import { QuestionWithOptions, UserFormResponse } from '../types/termsForm'
+import logger from '../lib/logger'
 
 interface EventTermsModalProps {
     isOpen: boolean
@@ -36,7 +37,7 @@ export const EventTermsModal: React.FC<EventTermsModalProps> = ({
         const scrollableHeight = scrollHeight - clientHeight
         const scrollPercentage = scrollableHeight > 0 ? (scrollTop / scrollableHeight) * 100 : 100
 
-        console.log('Scroll event:', {
+        logger.debug('Scroll event:', {
             scrollTop,
             scrollHeight,
             clientHeight,
@@ -48,7 +49,7 @@ export const EventTermsModal: React.FC<EventTermsModalProps> = ({
         // Usuário deve rolar até pelo menos 90% do conteúdo ou chegar ao final
         const hasReachedEnd = scrollPercentage >= 90 || scrollTop + clientHeight >= scrollHeight - 5
         if (hasReachedEnd) {
-            console.log('Chegou ao final do scroll - habilitando aceitação')
+            logger.debug('Chegou ao final do scroll - habilitando aceitação')
             setHasScrolledToEnd(true)
         }
     }
@@ -56,7 +57,7 @@ export const EventTermsModal: React.FC<EventTermsModalProps> = ({
     // Reset estados quando modal abre
     useEffect(() => {
         if (isOpen) {
-            console.log('Modal aberto - resetando estados')
+            logger.debug('Modal aberto - resetando estados')
             setHasAccepted(false)
             setHasScrolledToEnd(false)
             setFormResponses([])
@@ -65,57 +66,16 @@ export const EventTermsModal: React.FC<EventTermsModalProps> = ({
         }
     }, [isOpen, questions])
 
-    // Validação do formulário quando respostas ou perguntas mudam
-    useEffect(() => {
-        console.log('🔍 Validando formulário:', {
-            questionsLength: questions.length,
-            responsesLength: formResponses.length,
-            questions: questions.map(q => ({ id: q.id, text: q.question_text, required: q.is_required })),
-            responses: formResponses
-        })
-
-        const requiredQuestions = questions.filter(q => q.is_required)
-
-        if (requiredQuestions.length === 0) {
-            console.log('✅ Nenhuma pergunta obrigatória - formulário válido')
-            setFormIsValid(true)
-            setFormErrors([])
-            return
-        }
-
-        const errors: string[] = []
-        const answeredQuestionIds = new Set(formResponses.map(r => r.questionId))
-
-        requiredQuestions.forEach(question => {
-            if (!answeredQuestionIds.has(question.id)) {
-                errors.push(`Pergunta obrigatória não respondida: ${question.question_text}`)
-            } else {
-                const response = formResponses.find(r => r.questionId === question.id)
-                if (response) {
-                    if (question.question_type === 'text' && (!response.textResponse || response.textResponse.trim() === '')) {
-                        errors.push(`Resposta de texto obrigatória: ${question.question_text}`)
-                    } else if (['multiple_choice', 'single_choice'].includes(question.question_type) &&
-                        (!response.selectedOptions || response.selectedOptions.length === 0)) {
-                        errors.push(`Seleção obrigatória: ${question.question_text}`)
-                    }
-                }
-            }
-        })
-
-        console.log('🚨 Erros de validação:', errors)
-        console.log('📝 Formulário válido:', errors.length === 0)
-
-        setFormErrors(errors)
-        setFormIsValid(errors.length === 0)
-    }, [questions, formResponses])
+    // A validação das perguntas (incluindo a pergunta fixa de veículo) é delegada
+    // ao componente `TermsQuestionsForm` via callback `onValidation`.
 
     const handleFormChange = (responses: UserFormResponse[]) => {
-        console.log('📝 Atualizando respostas do formulário:', responses)
+        logger.debug('Atualizando respostas do formulário:', responses)
         setFormResponses(responses)
     }
 
-    const handleAccept = () => {
-        console.log('🎯 Tentativa de aceitar:', {
+    const handleAccept = async () => {
+        logger.debug('Tentativa de aceitar:', {
             hasAccepted,
             hasScrolledToEnd,
             formIsValid,
@@ -124,10 +84,27 @@ export const EventTermsModal: React.FC<EventTermsModalProps> = ({
         })
 
         if (hasAccepted && hasScrolledToEnd && formIsValid) {
-            console.log('✅ Aceitando termos e enviando respostas')
-            onAccept(formResponses)
+            logger.info('Aceitando termos e enviando respostas', { formResponses })
+            try {
+                const possiblePromise = onAccept(formResponses)
+                // Se onAccept retornar uma Promise, aguardar e capturar rejeições
+                if (possiblePromise && typeof (possiblePromise as any).then === 'function') {
+                    await (possiblePromise as any).catch((err: any) => {
+                        logger.error('Erro rejeitado em onAccept:', err)
+                        alert('Erro ao aceitar termos: ' + (err instanceof Error ? err.message : String(err)))
+                        throw err
+                    })
+                }
+            } catch (err) {
+                logger.error('Erro ao executar onAccept:', err)
+                // já mostramos alert no catch acima para rejeições assíncronas,
+                // mas garantir uma mensagem também aqui para erros síncronos
+                if (!(err instanceof Error) || !err.message) {
+                    alert('Erro ao aceitar termos. Verifique o console para mais detalhes.')
+                }
+            }
         } else {
-            console.log('❌ Condições não atendidas para aceitar')
+            logger.debug('Condições não atendidas para aceitar')
         }
     }
 
@@ -179,6 +156,10 @@ export const EventTermsModal: React.FC<EventTermsModalProps> = ({
                                     questions={questions}
                                     responses={formResponses}
                                     onChange={handleFormChange}
+                                    onValidation={(isValid, errors) => {
+                                        setFormIsValid(isValid)
+                                        setFormErrors(errors)
+                                    }}
                                 />
                             )}
 

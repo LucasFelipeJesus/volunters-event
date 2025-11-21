@@ -11,6 +11,12 @@ DROP FUNCTION IF EXISTS handle_new_user() CASCADE;
 DROP FUNCTION IF EXISTS setup_admin_profile(uuid, text, text) CASCADE;
 DROP FUNCTION IF EXISTS is_admin_safe() CASCADE;
 DROP FUNCTION IF EXISTS get_user_role(uuid) CASCADE;
+-- Remover triggers de updated_at se existirem (evita erro ao recriar)
+DROP TRIGGER IF EXISTS update_users_updated_at ON users;
+DROP TRIGGER IF EXISTS update_events_updated_at ON events;
+DROP TRIGGER IF EXISTS update_teams_updated_at ON teams;
+DROP TRIGGER IF EXISTS update_evaluations_updated_at ON evaluations;
+DROP TRIGGER IF EXISTS update_admin_evaluations_updated_at ON admin_evaluations;
 
 -- Remover todas as políticas se existirem
 DO $$
@@ -245,6 +251,9 @@ EXCEPTION
     RETURN false;
 END;
 $$ language 'plpgsql';
+-- Garantir que a função rode com privilégios do owner para evitar bloqueios por RLS
+ALTER FUNCTION setup_admin_profile(uuid, text, text) OWNER TO postgres;
+ALTER FUNCTION setup_admin_profile(uuid, text, text) SECURITY DEFINER;
 
 -- 5. POLÍTICAS RLS OTIMIZADAS (SEM RECURSÃO)
 

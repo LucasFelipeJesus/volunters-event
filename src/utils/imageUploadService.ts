@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase'
+import logger from '../lib/logger'
 
 interface UploadOptions {
     bucket: string
@@ -94,7 +95,7 @@ export class ImageUploadService {
                 }
             )
 
-            console.log(`Fazendo upload para bucket '${options.bucket}':`, fileName)
+            logger.debug(`Fazendo upload para bucket '${options.bucket}':`, fileName)
 
             // Fazer upload
             const { data, error } = await supabase.storage
@@ -105,7 +106,7 @@ export class ImageUploadService {
                 })
 
             if (error) {
-                console.error('Erro no upload do Supabase:', error)
+                logger.error('Erro no upload do Supabase:', error)
                 throw new Error(`Erro ao fazer upload da imagem: ${error.message}`)
             }
 
@@ -114,14 +115,14 @@ export class ImageUploadService {
                 .from(options.bucket)
                 .getPublicUrl(data.path)
 
-            console.log('Upload realizado com sucesso:', publicUrl)
+            logger.info('Upload realizado com sucesso:', publicUrl)
 
             return {
                 publicUrl,
                 path: data.path
             }
         } catch (error) {
-            console.error('Erro no serviço de upload:', error)
+            logger.error('Erro no serviço de upload:', error)
             throw error
         }
     }
@@ -136,13 +137,13 @@ export class ImageUploadService {
                 .remove([path])
 
             if (error) {
-                console.error('Erro ao deletar imagem:', error)
+                logger.error('Erro ao deletar imagem:', error)
                 throw new Error(`Erro ao deletar imagem: ${error.message}`)
             }
 
-            console.log('Imagem deletada com sucesso:', path)
+            logger.info('Imagem deletada com sucesso:', path)
         } catch (error) {
-            console.error('Erro no serviço de exclusão:', error)
+            logger.error('Erro no serviço de exclusão:', error)
             throw error
         }
     }
@@ -157,13 +158,13 @@ export class ImageUploadService {
                 .list(folder)
 
             if (error) {
-                console.error('Erro ao listar imagens:', error)
+                logger.error('Erro ao listar imagens:', error)
                 throw new Error(`Erro ao listar imagens: ${error.message}`)
             }
 
             return data || []
         } catch (error) {
-            console.error('Erro no serviço de listagem:', error)
+            logger.error('Erro no serviço de listagem:', error)
             throw error
         }
     }

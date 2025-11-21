@@ -1,5 +1,6 @@
 // Script para verificar e criar buckets necessários no Supabase
 import { supabase } from '../lib/supabase'
+import logger from '../lib/logger'
 
 interface BucketConfig {
     id: string
@@ -94,36 +95,27 @@ export async function getBucketStatus(): Promise<Record<string, boolean>> {
 
         return status
     } catch (error) {
-        console.error('Erro ao verificar status dos buckets:', error)
+        logger.error('Erro ao verificar status dos buckets:', error)
         return {}
     }
 }
 
 // Para uso em desenvolvimento/debug
 export async function debugBuckets(): Promise<void> {
-    console.log('🔍 Verificando buckets...')
+    logger.info('Verificando buckets...')
 
     const result = await checkAndCreateBuckets()
 
-    console.log(`Status: ${result.success ? '✅' : '❌'} ${result.message}`)
-    result.details.forEach(detail => console.log(`   ${detail}`))
+    logger.info(`Status: ${result.success ? 'OK' : 'FAIL'} ${result.message}`)
+    result.details.forEach(detail => logger.info(`   ${detail}`))
 
     if (!result.success) {
-        console.log('\n📋 Script SQL para criar buckets faltantes:')
-        console.log('Execute no SQL Editor do Supabase Dashboard:')
-        console.log('\n-- Criar buckets faltantes')
+        logger.info('\nScript SQL para criar buckets faltantes:')
+        logger.info('Execute no SQL Editor do Supabase Dashboard:')
+        logger.info('\n-- Criar buckets faltantes')
 
         requiredBuckets.forEach(bucket => {
-            console.log(`
-INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-VALUES (
-    '${bucket.id}', 
-    '${bucket.name}', 
-    ${bucket.public},
-    ${bucket.fileSizeLimit},
-    ARRAY[${bucket.allowedMimeTypes?.map(t => `'${t}'`).join(', ')}]
-)
-ON CONFLICT (id) DO NOTHING;`)
+            logger.info(`\nINSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)\nVALUES (\n    '${bucket.id}', \n    '${bucket.name}', \n    ${bucket.public},\n    ${bucket.fileSizeLimit},\n    ARRAY[${bucket.allowedMimeTypes?.map(t => `'${t}'`).join(', ')}]\n)\nON CONFLICT (id) DO NOTHING;`)
         })
     }
 }

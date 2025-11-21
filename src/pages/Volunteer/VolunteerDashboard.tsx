@@ -4,6 +4,7 @@ import { useAuth } from '../../hooks/useAuth'
 import { supabase } from '../../lib/supabase'
 import { EventTermsModal } from '../../components/EventTermsModal'
 import { ViewEventTermsModal } from '../../components/ViewEventTermsModal'
+import logger from '../../lib/logger'
 import { QuestionWithOptions, UserFormResponse } from '../../types/termsForm'
 import {
     Calendar,
@@ -40,45 +41,32 @@ interface VolunteerEvent {
 
 interface MyParticipation {
     id: string
-    team_id: string
-    role_in_team: 'captain' | 'volunteer'
-    status: 'active' | 'inactive' | 'removed'
-    joined_at: string
-    left_at?: string
-    can_leave: boolean
     team: {
         id: string
-        name: string
-        description?: string
-        max_volunteers: number
-        current_volunteers: number
+        name?: string
+        max_volunteers?: number
+        current_volunteers?: number
         event: {
-            id: string
-            title: string
-            event_date: string
-            start_time: string
-            end_time: string
-            location: string
-            status: string
-            category: string
+            id?: string
+            title?: string
+            event_date?: string
+            start_time?: string
+            end_time?: string
+            category?: string
+            location?: string
             max_volunteers?: number
         }
-        captain: {
+        captain?: {
             id: string
-            full_name: string
-            email: string
+            full_name?: string
+            email?: string
         }
-        members?: Array<{
-            id: string;
-            role_in_team: 'captain' | 'volunteer';
-            status: 'active' | 'inactive' | 'removed';
-            user?: {
-                id: string;
-                full_name: string;
-                email: string;
-            };
-        }>
+        members?: Array<any>
     }
+    status?: string
+    role_in_team?: string
+    joined_at?: string
+    can_leave?: boolean
     registration_id?: string
 }
 
@@ -203,8 +191,8 @@ export const VolunteerDashboard: React.FC = () => {
             const { data: evaluationsData } = await supabase.from('evaluations').select(`*, captain:users!evaluations_captain_id_fkey(id, full_name), event:events(id, title, event_date), team:teams(id, name)`).eq('volunteer_id', user.id);
             setMyEvaluations(evaluationsData || []);
 
-            const activeParticipations = finalParticipations.filter(p => p.status === 'active' && p.team.event.event_date >= todayString).length;
-            const completedEvents = finalParticipations.filter(p => p.team.event.event_date < todayString).length;
+            const activeParticipations = finalParticipations.filter(p => p.status === 'active' && p.team.event.event_date && p.team.event.event_date >= todayString).length;
+            const completedEvents = finalParticipations.filter(p => p.team.event.event_date && p.team.event.event_date < todayString).length;
             const avgRating = evaluationsData && evaluationsData.length > 0 ? evaluationsData.reduce((sum, e) => sum + e.rating, 0) / evaluationsData.length : 0;
             const categoryCount = finalParticipations.reduce((acc, p) => {
                 const category = p.team?.event?.category || 'other';
@@ -216,7 +204,7 @@ export const VolunteerDashboard: React.FC = () => {
             setStats({ totalParticipations: finalParticipations.length, activeParticipations, completedEvents, averageRating: Math.round(avgRating * 10) / 10, totalEvaluations: evaluationsData?.length || 0, bestCategory });
 
         } catch (error) {
-            console.error('Erro ao carregar dados do voluntário:', error);
+            logger.error('Erro ao carregar dados do voluntário:', error);
         } finally {
             setLoading(false);
         }
@@ -245,7 +233,7 @@ export const VolunteerDashboard: React.FC = () => {
             }
             await fetchVolunteerData();
         } catch (error) {
-            console.error('Erro ao sair da equipe/cancelar inscrição:', error);
+            logger.error('Erro ao sair da equipe/cancelar inscrição:', error);
             alert('Erro ao processar sua solicitação. Tente novamente.');
         }
     };
@@ -324,16 +312,104 @@ export const VolunteerDashboard: React.FC = () => {
     const handleAcceptTerms = async (responses: UserFormResponse[]) => {
         setTermsModal(prev => ({ ...prev, loading: true }));
         try {
-            if (responses.length > 0) {
-                const responsePromises = responses.map(res => supabase.from('event_terms_responses').upsert({ user_id: user!.id, event_id: termsModal.eventId, question_id: res.questionId, selected_options: res.selectedOptions, text_response: res.textResponse || null, responded_at: new Date().toISOString() }, { onConflict: 'user_id,event_id,question_id' }));
-                const results = await Promise.all(responsePromises);
-                if (results.some(r => r.error)) throw new Error('Erro ao salvar respostas do formulário');
+            logger.debug('Enviando respostas ao servidor:', responses)
+            // Separar respostas normais (questionId UUID) e especiais (prefixed with __)
+            const specialResponses = responses.filter(r => typeof r.questionId === 'string' && r.questionId.startsWith('__'))
+            const normalResponses = responses.filter(r => !(typeof r.questionId === 'string' && r.questionId.startsWith('__')))
+
+            if (normalResponses.length > 0) {
+                const responsePromises = normalResponses.map(async (res) => {
+                    try {
+                        const result = await supabase.from('event_terms_responses').upsert({
+                            user_id: user!.id,
+                            event_id: termsModal.eventId,
+                            question_id: res.questionId,
+                            selected_options: res.selectedOptions,
+                            text_response: res.textResponse || null,
+                            responded_at: new Date().toISOString()
+                        }, { onConflict: 'user_id,event_id,question_id' })
+                        logger.debug('Upsert result for', res.questionId, result)
+                        if (result.error) {
+                            logger.error('Upsert error for', res.questionId, result.error)
+                            throw result.error
+                        }
+                        return result
+                    } catch (e) {
+                        logger.error('Exception while upserting response', { questionId: res.questionId, error: e })
+                        throw e
+                    }
+                })
+
+                const results = await Promise.all(responsePromises.map(p => p.catch(err => ({ error: err }))))
+                logger.debug('All upsert results:', results)
+
+                const anyError = results.some(r => r && (r as any).error)
+                if (anyError) {
+                    const errs = results.filter(r => r && (r as any).error).map(r => (r as any).error)
+                    logger.error('Erros ao salvar respostas:', errs)
+                    throw new Error('Erro ao salvar respostas do formulário: ' + (errs[0]?.message || JSON.stringify(errs[0]) || 'unknown'))
+                }
             }
             await processEventRegistration(termsModal.eventId);
+
+            // Após garantir que a inscrição existe, persistir respostas especiais (ex.: __vehicle_info)
+            if (specialResponses.length > 0) {
+                try {
+                    const { data: regData, error: regError } = await supabase.from('event_registrations').select('id, notes').eq('event_id', termsModal.eventId).eq('user_id', user!.id).maybeSingle();
+                    if (regError) {
+                        if ((regError as any).code === '42703' || String((regError as any).message || '').includes('notes')) {
+                            logger.warn('Coluna `notes` ausente em event_registrations — respostas especiais serão ignoradas.');
+                        } else {
+                            logger.error('Erro ao buscar inscrição para salvar respostas especiais:', regError)
+                            throw regError
+                        }
+                    } else {
+                        const existingNotes: any = (() => {
+                            if (regData && typeof regData.notes === 'string') {
+                                try { return JSON.parse(regData.notes) } catch { return {} }
+                            }
+                            return {}
+                        })();
+
+                        let merged = { ...existingNotes }
+                        for (const s of specialResponses) {
+                            try {
+                                const parsed = s.textResponse ? JSON.parse(s.textResponse) : null
+                                if (s.questionId === '__vehicle_info') {
+                                    merged['vehicle_info'] = parsed
+                                } else {
+                                    merged[s.questionId] = parsed || s.textResponse
+                                }
+                            } catch (e) {
+                                logger.warn('Falha ao parsear special response', s.questionId, e)
+                                merged[s.questionId] = s.textResponse
+                            }
+                        }
+
+                        const notesString = JSON.stringify(merged)
+                        if (regData && regData.id) {
+                            const { error: updateErr } = await supabase.from('event_registrations').update({ notes: notesString }).eq('id', regData.id)
+                            if (updateErr) {
+                                if ((updateErr as any).code === '42703') logger.warn('Coluna `notes` ausente ao tentar atualizar — ignorando.');
+                                else logger.error('Erro ao atualizar notes da inscrição:', updateErr)
+                            }
+                        } else {
+                            const { error: insertErr } = await supabase.from('event_registrations').insert({ event_id: termsModal.eventId, user_id: user!.id, status: 'confirmed', terms_accepted: true, terms_accepted_at: new Date().toISOString(), notes: notesString })
+                            if (insertErr) {
+                                if ((insertErr as any).code === '42703') logger.warn('Coluna `notes` ausente ao tentar inserir inscrição com notes — ignorando.');
+                                else logger.error('Erro ao inserir inscrição com notes:', insertErr)
+                            }
+                        }
+                    }
+                } catch (e) {
+                    logger.error('Erro ao persistir respostas especiais:', e)
+                }
+            }
             handleCloseTermsModal();
         } catch (error) {
-            console.error('Erro ao aceitar termos:', error);
-            alert('Erro ao aceitar termos. Tente novamente.');
+            logger.error('Erro ao aceitar termos:', error);
+            const message = error instanceof Error ? error.message : String(error)
+            alert('Erro ao aceitar termos. ' + message)
         } finally {
             setTermsModal(prev => ({ ...prev, loading: false }));
         }
@@ -346,12 +422,29 @@ export const VolunteerDashboard: React.FC = () => {
             const { data: termsData } = await supabase.from('event_terms').select('terms_content').eq('event_id', eventId).eq('is_active', true).single();
             if (!termsData) { alert('Termos não encontrados.'); return; }
 
-            const { data: registrationData } = await supabase.from('event_registrations').select('terms_accepted_at').eq('event_id', eventId).eq('user_id', user!.id).eq('terms_accepted', true).maybeSingle();
+            const { data: registrationData } = await supabase.from('event_registrations').select('terms_accepted_at, notes').eq('event_id', eventId).eq('user_id', user!.id).eq('terms_accepted', true).maybeSingle();
             const { data: questionsData } = await supabase.from('event_terms_questions').select(`*, options:event_terms_question_options(*)`).eq('event_id', eventId).eq('is_active', true).order('question_order');
             const { data: responsesData } = await supabase.from('event_terms_responses').select('*').eq('event_id', eventId).eq('user_id', user!.id);
 
             const formattedQuestions: QuestionWithOptions[] = (questionsData || []).map(q => ({ ...q, options: q.options || [] }));
             const userResponses: UserFormResponse[] = (responsesData || []).map(res => ({ questionId: res.question_id, selectedOptions: res.selected_options || [], textResponse: res.text_response || undefined }));
+
+            // Incluir respostas especiais armazenadas em event_registrations.notes
+            if (registrationData && registrationData.notes) {
+                try {
+                    const notesObj = JSON.parse(registrationData.notes)
+                    if (notesObj && typeof notesObj === 'object') {
+                        // exemplo: vehicle_info -> __vehicle_info
+                        if (notesObj.vehicle_info) {
+                            userResponses.push({ questionId: '__vehicle_info', selectedOptions: [], textResponse: JSON.stringify(notesObj.vehicle_info) })
+                        }
+                        // outras chaves personalizadas podem ser adicionadas aqui
+                    }
+                } catch (e) {
+                    // se notes não for JSON, adicionamos como texto cru
+                    userResponses.push({ questionId: '__notes', selectedOptions: [], textResponse: String(registrationData.notes) })
+                }
+            }
 
             setViewTermsModal({ isOpen: true, eventName: eventTitle, termsContent: termsData.terms_content, acceptanceDate: registrationData?.terms_accepted_at || null, questions: formattedQuestions, userResponses });
         } catch (error) {
@@ -384,7 +477,7 @@ export const VolunteerDashboard: React.FC = () => {
 
     const formatTime = (timeString?: string) => timeString?.slice(0, 5) || '';
 
-    const getStatusColor = (status: string) => {
+    const getStatusColor = (status?: string) => {
         switch (status) {
             case 'active': return 'text-green-600 bg-green-50 border-green-200';
             case 'inactive': return 'text-yellow-600 bg-yellow-50 border-yellow-200';
@@ -392,16 +485,16 @@ export const VolunteerDashboard: React.FC = () => {
             default: return 'text-gray-600 bg-gray-50 border-gray-200';
         }
     };
-
-    const getStatusText = (status: string, participation?: MyParticipation) => {
+    const getStatusText = (status?: string, participation?: MyParticipation) => {
         const todayString = new Date().toISOString().split('T')[0];
-        if (participation?.team?.name === 'Inscrição Direta' && status === 'active') return 'Ativo';
-        if (status === 'inactive' && participation?.team?.event?.event_date && participation.team.event.event_date >= todayString) return 'Aguardando alocar equipe';
-        switch (status) {
+        const s = status || '';
+        if (participation?.team?.name === 'Inscrição Direta' && s === 'active') return 'Ativo';
+        if (s === 'inactive' && participation?.team?.event?.event_date && participation.team.event.event_date >= todayString) return 'Aguardando alocar equipe';
+        switch (s) {
             case 'active': return 'Ativo';
             case 'inactive': return 'Inativo';
             case 'removed': return 'Removido';
-            default: return status;
+            default: return s;
         }
     };
 
@@ -417,14 +510,14 @@ export const VolunteerDashboard: React.FC = () => {
     );
 
     const filteredParticipations = myParticipations.filter(p =>
-        p.team?.event?.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        p.team?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        p.team?.event?.location?.toLowerCase().includes(searchTerm.toLowerCase())
+        (p.team?.event?.title || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (p.team?.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (p.team?.event?.location || '').toLowerCase().includes(searchTerm.toLowerCase())
     );
 
     const historicParticipations = myParticipations.filter(p => {
         const todayString = new Date().toISOString().split('T')[0];
-        return p.team?.event?.event_date < todayString;
+        return (p.team?.event?.event_date || '') < todayString;
     });
 
     if (loading) {
@@ -515,11 +608,11 @@ export const VolunteerDashboard: React.FC = () => {
                     </div>
                     {activeTab === 'participations' && (
                         <div>
-                            {filteredParticipations.filter(p => p.team.event.event_date >= new Date().toISOString().split('T')[0]).length === 0 ? (
+                            {filteredParticipations.filter(p => p.team.event.event_date && p.team.event.event_date >= new Date().toISOString().split('T')[0]).length === 0 ? (
                                 <div className="text-center py-12"><Users className="mx-auto h-12 w-12 text-gray-400 mb-4" /><h3 className="text-lg font-medium text-gray-900">Nenhuma participação ativa</h3><p className="text-sm text-gray-500 mt-2">Inscreva-se em um evento para vê-lo aqui.</p></div>
                             ) : (
                                 <div className="space-y-4">
-                                        {filteredParticipations.filter(p => p.team.event.event_date >= new Date().toISOString().split('T')[0]).map((p) => (
+                                        {filteredParticipations.filter(p => p.team.event.event_date && p.team.event.event_date >= new Date().toISOString().split('T')[0]).map((p) => (
                                             <div key={p.id} className="bg-gray-50 rounded-lg p-4 border border-gray-200">
                                             <div className="flex items-start justify-between">
                                                 <div className="flex-1">

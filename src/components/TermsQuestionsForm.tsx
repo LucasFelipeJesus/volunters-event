@@ -1,4 +1,7 @@
-import React from 'react'
+import React, { useEffect, useState } from 'react'
+import { useAuth } from '../hooks/useAuth'
+import { userService } from '../lib/services'
+import logger from '../lib/logger'
 import { QuestionWithOptions, UserFormResponse } from '../types/termsForm'
 
 interface TermsQuestionsFormProps {
@@ -14,9 +17,140 @@ export const TermsQuestionsForm: React.FC<TermsQuestionsFormProps> = ({
     onChange,
     onValidation
 }) => {
+    const { user } = useAuth()
+
+    // Estado para pergunta fixa de veículo
+    const [willGoByVehicle, setWillGoByVehicle] = useState<boolean | null>(null)
+    const [vehicleSource, setVehicleSource] = useState<'profile' | 'manual'>('profile')
+    const [manualModel, setManualModel] = useState('')
+    const [manualPlate, setManualPlate] = useState('')
+    const [profileModelFallback, setProfileModelFallback] = useState<string | null>(null)
+    const [profilePlateFallback, setProfilePlateFallback] = useState<string | null>(null)
+
+    // Helper: procura o campo de veículo em várias possíveis estruturas do objeto `user`
+    const getUserField = (u: any, field: string) => {
+        if (!u) return null
+        if (u[field]) return u[field]
+        if (u.profile && u.profile[field]) return u.profile[field]
+        if (u.user_metadata && u.user_metadata[field]) return u.user_metadata[field]
+        return null
+    }
+
+    // Sincroniza estado da pergunta fixa com respostas iniciais e com o usuário
+    // Nota: não sobrescreveremos a escolha do usuário se não houver resposta existente,
+    // para evitar que cliques sejam revertidos por efeitos de sincronização.
+    useEffect(() => {
+        const existing = responses.find(r => r.questionId === '__vehicle_info')
+        if (existing && existing.textResponse) {
+            try {
+                const parsed = JSON.parse(existing.textResponse)
+                setWillGoByVehicle(true)
+                if (parsed.source === 'profile') {
+                    setVehicleSource('profile')
+                } else {
+                    setVehicleSource('manual')
+                    setManualModel(parsed.model || '')
+                    setManualPlate(parsed.plate || '')
+                }
+            } catch (e) {
+                // texto livre anterior — preencher como manual
+                setWillGoByVehicle(true)
+                setVehicleSource('manual')
+                setManualModel(existing.textResponse)
+            }
+        }
+        // se não existir resposta, não alteramos willGoByVehicle (permitir interação do usuário)
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [responses, user])
+
+    // Atualiza resposta fixa de veículo no array de respostas
+    useEffect(() => {
+        // Evitar loop de render: somente chamar onChange/updateResponse quando o
+        // payload efetivamente mudar em relação ao que já existe em `responses`.
+        if (willGoByVehicle === null) {
+            // chamar validação para forçar usuário a responder esta pergunta (obrigatória)
+            validateForm(responses)
+            return
+        }
+
+        if (!willGoByVehicle) {
+            // remover resposta se existir
+            const updated = responses.filter(r => r.questionId !== '__vehicle_info')
+            // Só atualizar se houver diferença
+            if (updated.length !== responses.length) {
+                onChange(updated)
+                validateForm(updated)
+            } else {
+                validateForm(updated)
+            }
+            return
+        }
+
+        // montar payload
+        let payload: any = { source: vehicleSource }
+        if (vehicleSource === 'profile') {
+            // prioriza campos do AuthContext, mas utiliza fallback buscado se necessário
+            payload.model = getUserField(user, 'vehicle_model') || profileModelFallback || ''
+            payload.plate = getUserField(user, 'vehicle_plate') || profilePlateFallback || ''
+        } else {
+            payload.model = manualModel
+            payload.plate = manualPlate
+        }
+
+        const payloadText = JSON.stringify(payload)
+        const existing = responses.find(r => r.questionId === '__vehicle_info')
+
+        // Se já existe uma resposta igual, não reenvia para evitar loop
+        if (existing && existing.textResponse === payloadText) {
+            // apenas revalida
+            validateForm(responses)
+            return
+        }
+
+        updateResponse('__vehicle_info', [], payloadText)
+        // Não incluir `responses` nas deps para evitar que onChange -> responses -> efeito -> onChange cause loop
+    }, [willGoByVehicle, vehicleSource, manualModel, manualPlate, user, profileModelFallback, profilePlateFallback])
+
+    // Se usuário selecionar usar veículo do perfil, mas os campos estão vazios,
+    // buscar profile atualizado diretamente no serviço para tentar recuperar model/plate.
+    useEffect(() => {
+        const getUserField = (u: any, field: string) => {
+            if (!u) return null
+            if (u[field]) return u[field]
+            if (u.profile && u.profile[field]) return u.profile[field]
+            if (u.user_metadata && u.user_metadata[field]) return u.user_metadata[field]
+            return null
+        }
+
+        const hasModelInUser = Boolean(getUserField(user, 'vehicle_model'))
+        const hasPlateInUser = Boolean(getUserField(user, 'vehicle_plate'))
+
+        const shouldFetchProfile = willGoByVehicle && vehicleSource === 'profile' && user && !(hasModelInUser && hasPlateInUser)
+        if (!shouldFetchProfile) return
+
+        let mounted = true
+            ; (async () => {
+                try {
+                    const profile = await userService.getProfile((user as any).id)
+                    if (!mounted) return
+                    if (profile) {
+                        const model = (profile as any).vehicle_model || (profile as any).profile?.vehicle_model || (profile as any).user_metadata?.vehicle_model || null
+                        const plate = (profile as any).vehicle_plate || (profile as any).profile?.vehicle_plate || (profile as any).user_metadata?.vehicle_plate || null
+                        setProfileModelFallback(model)
+                        setProfilePlateFallback(plate)
+                        logger.info('💡 vehicle fallback loaded from userService:', { model, plate })
+                    }
+                } catch (e) {
+                    logger.warn('Não foi possível buscar profile fallback:', e)
+                }
+            })()
+
+        return () => { mounted = false }
+    }, [willGoByVehicle, vehicleSource, user])
+
     // Função para atualizar uma resposta específica
     const updateResponse = (questionId: string, selectedOptions: string[], textResponse?: string) => {
-        console.log('🔄 Atualizando resposta:', { questionId, selectedOptions, textResponse })
+        logger.debug('Atualizando resposta:', { questionId, selectedOptions, textResponse })
 
         const updatedResponses = responses.filter(r => r.questionId !== questionId)
 
@@ -28,7 +162,7 @@ export const TermsQuestionsForm: React.FC<TermsQuestionsFormProps> = ({
             })
         }
 
-        console.log('📤 Enviando respostas atualizadas:', updatedResponses)
+        logger.debug('📤 Enviando respostas atualizadas:', updatedResponses)
         onChange(updatedResponses)
         validateForm(updatedResponses)
     }
@@ -54,6 +188,25 @@ export const TermsQuestionsForm: React.FC<TermsQuestionsFormProps> = ({
                 }
             }
         })
+
+        // Validação da pergunta fixa de veículo (obrigatória)
+        if (willGoByVehicle === null) {
+            errors.push('Informe se irá de veículo ao evento (Sim / Não / Prefiro não informar)')
+        } else if (willGoByVehicle) {
+            if (vehicleSource === 'profile') {
+                const modelVal = getUserField(user, 'vehicle_model') || profileModelFallback || ''
+                const plateVal = getUserField(user, 'vehicle_plate') || profilePlateFallback || ''
+                const hasModel = Boolean(modelVal && modelVal.trim())
+                const hasPlate = Boolean(plateVal && plateVal.trim())
+                if (!hasModel || !hasPlate) {
+                    errors.push('Seu perfil não possui modelo e/ou placa. Selecione "Inserir manualmente" ou atualize seu perfil.')
+                }
+            } else {
+                if (!manualModel.trim() || !manualPlate.trim()) {
+                    errors.push('Preencha modelo e placa do veículo quando escolher inserir manualmente.')
+                }
+            }
+        }
 
         onValidation?.(errors.length === 0, errors)
     }
@@ -158,6 +311,59 @@ export const TermsQuestionsForm: React.FC<TermsQuestionsFormProps> = ({
                 <p className="text-sm text-gray-600 mb-6">
                     Por favor, responda às perguntas abaixo para ajudar na organização do evento:
                 </p>
+            </div>
+
+            {/* Pergunta fixa: Vai de veículo? */}
+            <div className="bg-white rounded-lg p-4 border border-gray-200">
+                <h4 className="text-base font-medium text-gray-900 mb-2">Vai de veículo ao evento?</h4>
+                <div className="flex items-center space-x-4 mb-3">
+                    <label className={`inline-flex items-center cursor-pointer`}>
+                        <input type="radio" name="will_go_vehicle" checked={willGoByVehicle === true} onChange={() => setWillGoByVehicle(true)} className="mr-2" />
+                        <span>Sim</span>
+                    </label>
+                    <label className={`inline-flex items-center cursor-pointer`}>
+                        <input type="radio" name="will_go_vehicle" checked={willGoByVehicle === false} onChange={() => setWillGoByVehicle(false)} className="mr-2" />
+                        <span>Não</span>
+                    </label>
+                    <label className={`inline-flex items-center cursor-pointer`}>
+                        <input type="radio" name="will_go_vehicle" checked={willGoByVehicle === null} onChange={() => setWillGoByVehicle(null)} className="mr-2" />
+                        <span>Prefiro não informar</span>
+                    </label>
+                </div>
+
+                {willGoByVehicle && (
+                    <div className="mt-3 space-y-3">
+                        <p className="text-sm text-gray-600">Como gostaria de informar o veículo?</p>
+                        <div className="flex items-center space-x-4">
+                            <label className="inline-flex items-center">
+                                <input type="radio" name="vehicle_source" checked={vehicleSource === 'profile'} onChange={() => setVehicleSource('profile')} className="mr-2" />
+                                <span>Usar veículo do meu perfil</span>
+                            </label>
+                            <label className="inline-flex items-center">
+                                <input type="radio" name="vehicle_source" checked={vehicleSource === 'manual'} onChange={() => setVehicleSource('manual')} className="mr-2" />
+                                <span>Inserir manualmente</span>
+                            </label>
+                        </div>
+
+                        {vehicleSource === 'profile' ? (
+                            <div className="text-sm text-gray-700">
+                                <p>Modelo: <strong>{getUserField(user, 'vehicle_model') || profileModelFallback || 'Não informado'}</strong></p>
+                                <p>Placa: <strong>{getUserField(user, 'vehicle_plate') || profilePlateFallback || 'Não informado'}</strong></p>
+                            </div>
+                        ) : (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Modelo do veículo</label>
+                                    <input type="text" value={manualModel} onChange={(e) => setManualModel(e.target.value)} placeholder="Ex: Honda Civic" className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Placa</label>
+                                    <input type="text" value={manualPlate} onChange={(e) => setManualPlate(e.target.value)} placeholder="ABC-1234" className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                )}
             </div>
 
             {questions

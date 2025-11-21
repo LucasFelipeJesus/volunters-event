@@ -126,10 +126,16 @@ Será divulgado no grupo de voluntários.
 10. Responsabilidades
 Lembramos que cada voluntário é responsável pela sua condição física e segurança pessoal.
 
+11. AUTORIZAÇÃO DE USO DE IMAGEM
+AUTORIZO o uso de minha imagem, em fotos e/ ou vídeos, sem finalidade comercial, para ser utilizada nos trabalhos desenvolvidos no âmbito do evento Churrasco On fire. A presente autorização é concedida a título gratuito, abrangendo o uso da imagem em todo território nacional e no exterior, sempre para fins de divulgação do evento. Por esta ser a expressão da minha vontade, declaro que autorizo o uso acima descrito sem que nada haja a ser reclamado a título de direitos conexos à minha imagem ou a qualquer outro.
+
+Lembramos que cada voluntário é responsável pela sua condição física e não nos responsabilizamos por acidentes com facas, fogo, etc.
+
 Mais informações serão compartilhadas com os voluntários confirmados.
 
 Obrigado pelo seu interesse em estar conosco!`
     }
+
 
     const handleTermsContentChange = (newContent: string) => {
         setTermsContent(newContent)

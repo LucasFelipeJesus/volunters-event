@@ -225,7 +225,7 @@ DECLARE
     can_evaluate boolean := false;
 BEGIN
     -- Verificar se o voluntário foi membro da equipe do capitão no evento
-    SELECT EXISTS(
+      SELECT EXISTS(
         SELECT 1
         FROM team_members tm
         JOIN teams t ON tm.team_id = t.id
@@ -233,13 +233,12 @@ BEGIN
         AND t.captain_id = captain_id_param
         AND t.event_id = event_id_param
         AND t.id = team_id_param
-        AND tm.status = 'active'
         AND tm.role_in_team = 'volunteer'
     ) INTO can_evaluate;
     
     RETURN can_evaluate;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- Função para obter equipes onde o voluntário pode avaliar o capitão
 CREATE OR REPLACE FUNCTION get_evaluable_captains_for_volunteer(volunteer_id_param uuid)
@@ -278,12 +277,54 @@ BEGIN
     JOIN users c ON t.captain_id = c.id
     WHERE tm.user_id = volunteer_id_param
     AND tm.role_in_team = 'volunteer'
-    AND tm.status = 'active'
     AND e.status = 'completed' -- Só permite avaliar eventos finalizados
     ORDER BY e.event_date DESC;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
+-- Habilitar SECURITY DEFINER e ajustar owner para funções que leem a tabela users
+ALTER FUNCTION can_volunteer_evaluate_captain(uuid, uuid, uuid, uuid) OWNER TO postgres;
+ALTER FUNCTION get_evaluable_captains_for_volunteer(uuid) OWNER TO postgres;
+ 
+-- Função RPC para capitães obterem membros (voluntários) das suas equipes em eventos finalizados
+CREATE OR REPLACE FUNCTION get_team_members_for_captain(captain_id_param uuid)
+RETURNS TABLE(
+  event_id uuid,
+  event_title text,
+  event_date date,
+  team_id uuid,
+  team_name text,
+  member_id uuid,
+  member_full_name text,
+  member_email text,
+  member_role text,
+  member_status text
+) AS $$
+BEGIN
+  RETURN QUERY
+  SELECT
+    e.id,
+    e.title,
+    e.event_date::date,
+    t.id,
+    t.name,
+    u.id,
+    u.full_name,
+    u.email,
+    tm.role_in_team,
+    tm.status
+  FROM teams t
+  JOIN events e ON t.event_id = e.id
+  JOIN team_members tm ON tm.team_id = t.id
+  JOIN users u ON u.id = tm.user_id
+  WHERE t.captain_id = captain_id_param
+    AND (e.status = 'completed' OR e.status = 'finished')
+    AND tm.role_in_team = 'volunteer'
+  ORDER BY e.event_date DESC;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+ALTER FUNCTION get_team_members_for_captain(uuid) OWNER TO postgres;
 -- Comentários nas tabelas para documentação
 COMMENT ON TABLE volunteer_evaluations IS 'Avaliações de capitães feitas por voluntários após eventos';
 COMMENT ON COLUMN volunteer_evaluations.leadership_rating IS 'Avaliação de liderança de 1 a 5';

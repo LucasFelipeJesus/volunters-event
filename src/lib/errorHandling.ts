@@ -144,26 +144,29 @@ export const formatSupabaseError = (error: SupabaseError, context?: string): For
  */
 export const logSupabaseError = (error: SupabaseError, context: string, additionalData?: Record<string, unknown>) => {
     const formattedError = formatSupabaseError(error, context)
+    // Use logger for structured output (no emojis in production)
+    // Mensagem principal de erro
+    // Import logger lazily to avoid circular deps in some setups
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const logger = require('./logger').default
 
-    console.group(`❌ ${formattedError.title}`)
-    console.error(`📍 Contexto: ${formattedError.context}`)
-    console.error(`🔢 Código: ${formattedError.code}`)
-    console.error(`💬 Mensagem: ${formattedError.message}`)
+    logger.error(`${formattedError.title}`)
+    logger.error(`Contexto: ${formattedError.context}`)
+    logger.error(`Código: ${formattedError.code}`)
+    logger.error(`Mensagem: ${formattedError.message}`)
 
     if (formattedError.originalMessage !== formattedError.message) {
-        console.error(`🔤 Mensagem Original: ${formattedError.originalMessage}`)
+        logger.error(`Mensagem Original: ${formattedError.originalMessage}`)
     }
 
     if (additionalData) {
-        console.error('📊 Dados Adicionais:', additionalData)
+        logger.error('Dados Adicionais:', additionalData)
     }
 
-    console.group('💡 Sugestões:')
+    logger.info('Sugestões:')
     formattedError.suggestions.forEach((suggestion, index) => {
-        console.log(`${index + 1}. ${suggestion}`)
+        logger.info(`${index + 1}. ${suggestion}`)
     })
-    console.groupEnd()
-    console.groupEnd()
 
     return formattedError
 }

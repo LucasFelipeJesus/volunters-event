@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase'
+import logger from '../lib/logger'
 
 /**
  * Utilitário para lidar com erros 500 do servidor Supabase
@@ -13,7 +14,7 @@ export interface ServerErrorInfo {
 }
 
 export const diagnoseServerError = async (): Promise<ServerErrorInfo> => {
-    console.log('🔍 [SERVER ERROR] Diagnosticando erro 500...')
+    logger.info('[SERVER ERROR] Diagnosticando erro 500...')
 
     const info: ServerErrorInfo = {
         hasServerError: false,
@@ -27,7 +28,7 @@ export const diagnoseServerError = async (): Promise<ServerErrorInfo> => {
         const { data: { session }, error: sessionError } = await supabase.auth.getSession()
 
         if (sessionError) {
-            console.error('❌ [SERVER ERROR] Problema na sessão:', sessionError)
+            logger.error('[SERVER ERROR] Problema na sessão:', sessionError)
             info.hasServerError = true
             info.errorType = 'auth'
             info.suggestions.push('Problema de autenticação - faça login novamente')
@@ -35,14 +36,14 @@ export const diagnoseServerError = async (): Promise<ServerErrorInfo> => {
         }
 
         if (!session) {
-            console.log('⚠️ [SERVER ERROR] Nenhuma sessão ativa')
+            logger.warn('[SERVER ERROR] Nenhuma sessão ativa')
             info.hasServerError = true
             info.errorType = 'auth'
             info.suggestions.push('Usuário não autenticado')
             return info
         }
 
-        console.log('✅ [SERVER ERROR] Sessão ativa:', session.user.email)
+        logger.info('[SERVER ERROR] Sessão ativa:', session.user.email)
 
         // Teste 2: Verificar acesso básico ao Supabase
         try {
@@ -52,7 +53,7 @@ export const diagnoseServerError = async (): Promise<ServerErrorInfo> => {
                 .limit(0)
 
             if (basicError) {
-                console.error('❌ [SERVER ERROR] Erro básico de acesso:', basicError)
+                    logger.error('[SERVER ERROR] Erro básico de acesso:', basicError)
 
                 if (basicError.message?.includes('permission denied') || basicError.message?.includes('policy')) {
                     info.hasServerError = true
@@ -79,12 +80,11 @@ export const diagnoseServerError = async (): Promise<ServerErrorInfo> => {
                 }
                 return info
             }
-
-            console.log('✅ [SERVER ERROR] Acesso básico funcionando')
+            logger.info('[SERVER ERROR] Acesso básico funcionando')
             info.canProceed = true
 
         } catch (error) {
-            console.error('❌ [SERVER ERROR] Erro de conexão:', error)
+            logger.error('[SERVER ERROR] Erro de conexão:', error)
             info.hasServerError = true
             info.errorType = 'connection'
             info.suggestions.push('Problema de conectividade com o Supabase')
@@ -93,12 +93,12 @@ export const diagnoseServerError = async (): Promise<ServerErrorInfo> => {
         }
 
         // Se chegou até aqui, não há erros detectados
-        console.log('✅ [SERVER ERROR] Nenhum erro de servidor detectado')
+        logger.info('[SERVER ERROR] Nenhum erro de servidor detectado')
         info.canProceed = true
         return info
 
     } catch (error) {
-        console.error('❌ [SERVER ERROR] Erro inesperado no diagnóstico:', error)
+        logger.error('[SERVER ERROR] Erro inesperado no diagnóstico:', error)
         info.hasServerError = true
         info.errorType = 'unknown'
         info.suggestions.push('Erro inesperado durante o diagnóstico')
@@ -111,7 +111,7 @@ export const diagnoseServerError = async (): Promise<ServerErrorInfo> => {
  * Contorna problemas de RLS e recursão infinita
  */
 export const createAdminWithSafeFunction = async (email: string, password: string, name: string) => {
-    console.log('🔧 [SAFE] Criando admin com função segura do banco...')
+    logger.info('[SAFE] Criando admin com função segura do banco...')
 
     try {
         // Método 1: Tentar criar usuário diretamente na auth
@@ -127,16 +127,16 @@ export const createAdminWithSafeFunction = async (email: string, password: strin
         })
 
         if (authError) {
-            console.error('❌ [SAFE] Erro ao criar usuário na auth:', authError)
+            logger.error('[SAFE] Erro ao criar usuário na auth:', authError)
             return { success: false, error: authError.message }
         }
 
         if (!authData.user) {
-            console.error('❌ [SAFE] Usuário não foi criado')
+            logger.error('[SAFE] Usuário não foi criado')
             return { success: false, error: 'Usuário não foi criado' }
         }
 
-        console.log('✅ [SAFE] Usuário criado na auth:', authData.user.email)
+        logger.info('[SAFE] Usuário criado na auth:', authData.user.email)
 
         // Aguardar um pouco para a criação do perfil via trigger
         await new Promise(resolve => setTimeout(resolve, 2000))
@@ -150,7 +150,7 @@ export const createAdminWithSafeFunction = async (email: string, password: strin
             })
 
         if (functionError) {
-            console.error('❌ [SAFE] Erro ao chamar função segura:', functionError)
+            logger.error('[SAFE] Erro ao chamar função segura:', functionError)
             return {
                 success: false,
                 error: `Erro ao criar perfil: ${functionError.message}`,
@@ -161,7 +161,7 @@ export const createAdminWithSafeFunction = async (email: string, password: strin
         const functionResult = result as { success: boolean; message?: string; error?: string; user_id?: string }
 
         if (!functionResult.success) {
-            console.error('❌ [SAFE] Função retornou erro:', functionResult.error)
+            logger.error('[SAFE] Função retornou erro:', functionResult.error)
             return {
                 success: false,
                 error: functionResult.error || 'Erro desconhecido na função',
@@ -169,7 +169,7 @@ export const createAdminWithSafeFunction = async (email: string, password: strin
             }
         }
 
-        console.log('✅ [SAFE] Perfil criado com função segura:', functionResult.message)
+        logger.info('[SAFE] Perfil criado com função segura:', functionResult.message)
 
         return {
             success: true,
@@ -178,7 +178,7 @@ export const createAdminWithSafeFunction = async (email: string, password: strin
         }
 
     } catch (error) {
-        console.error('❌ [SAFE] Erro inesperado:', error)
+        logger.error('[SAFE] Erro inesperado:', error)
         return { success: false, error: `Erro inesperado: ${error}` }
     }
 }
@@ -187,14 +187,14 @@ export const createAdminWithSafeFunction = async (email: string, password: strin
  * Verificar se admin existe usando métodos alternativos
  */
 export const checkAdminExistsWithFallback = async (email: string) => {
-    console.log('🔍 [FALLBACK] Verificando admin com método alternativo...')
+    logger.info('[FALLBACK] Verificando admin com método alternativo...')
 
     try {
         // Método 1: Tentar via auth users (não requer RLS)
         const { data: { user }, error: authError } = await supabase.auth.getUser()
 
         if (authError) {
-            console.error('❌ [FALLBACK] Erro ao verificar usuário atual:', authError)
+            logger.error('[FALLBACK] Erro ao verificar usuário atual:', authError)
             return { exists: false, isAdmin: false, error: authError.message }
         }
 
@@ -209,7 +209,7 @@ export const checkAdminExistsWithFallback = async (email: string) => {
                 .single()
 
             if (profileError) {
-                console.log('⚠️ [FALLBACK] Não foi possível verificar role na tabela users')
+                logger.warn('[FALLBACK] Não foi possível verificar role na tabela users')
                 return {
                     exists: true,
                     isAdmin: false,
@@ -229,7 +229,7 @@ export const checkAdminExistsWithFallback = async (email: string) => {
         return { exists: false, isAdmin: false }
 
     } catch (error) {
-        console.error('❌ [FALLBACK] Erro inesperado:', error)
+        logger.error('[FALLBACK] Erro inesperado:', error)
         return { exists: false, isAdmin: false, error: `Erro inesperado: ${error}` }
     }
 }

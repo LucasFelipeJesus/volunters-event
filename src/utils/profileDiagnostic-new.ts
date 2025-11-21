@@ -3,26 +3,27 @@
  */
 
 import { supabase } from '../lib/supabase'
+import logger from '../lib/logger'
 
 export async function diagnoseUserProfile(userId: string): Promise<void> {
-    console.log('🔧 [DIAGNOSTIC] INÍCIO - Verificando problemas de perfil para userId:', userId)
+    logger.info('[DIAGNOSTIC] INÍCIO - Verificando problemas de perfil para userId:', userId)
 
     try {
         // 1. Verificar se a sessão está ativa
-        console.log('🔑 [DIAGNOSTIC] Verificando sessão...')
+        logger.debug('[DIAGNOSTIC] Verificando sessão...')
         const { data: session, error: sessionError } = await supabase.auth.getSession()
 
         if (sessionError) {
-            console.error('❌ [DIAGNOSTIC] Erro ao obter sessão:', sessionError)
+            logger.error('[DIAGNOSTIC] Erro ao obter sessão:', sessionError)
             return
         }
 
-        console.log('🔑 [DIAGNOSTIC] Sessão ativa:', !!session.session?.user)
-        console.log('📧 [DIAGNOSTIC] Email da sessão:', session.session?.user?.email)
-        console.log('🆔 [DIAGNOSTIC] ID da sessão:', session.session?.user?.id)
+        logger.debug('[DIAGNOSTIC] Sessão ativa:', !!session.session?.user)
+        logger.debug('[DIAGNOSTIC] Email da sessão:', session.session?.user?.email)
+        logger.debug('[DIAGNOSTIC] ID da sessão:', session.session?.user?.id)
 
         // 2. Verificar se conseguimos acessar a tabela users
-        console.log('🔍 [DIAGNOSTIC] Testando acesso à tabela users...')
+        logger.debug('[DIAGNOSTIC] Testando acesso à tabela users...')
 
         const { data: users, error: usersError } = await supabase
             .from('users')
@@ -30,13 +31,13 @@ export async function diagnoseUserProfile(userId: string): Promise<void> {
             .limit(1)
 
         if (usersError) {
-            console.error('❌ [DIAGNOSTIC] Erro ao acessar tabela users:', usersError)
+            logger.error('[DIAGNOSTIC] Erro ao acessar tabela users:', usersError)
         } else {
-            console.log('✅ [DIAGNOSTIC] Tabela users acessível, encontrados:', users?.length || 0, 'usuários')
+            logger.info('[DIAGNOSTIC] Tabela users acessível, encontrados:', users?.length || 0, 'usuários')
         }
 
         // 3. Verificar se o usuário específico existe
-        console.log('🎯 [DIAGNOSTIC] Procurando usuário específico:', userId)
+        logger.debug('[DIAGNOSTIC] Procurando usuário específico:', userId)
 
         const { data: specificUser, error: specificError } = await supabase
             .from('users')
@@ -45,34 +46,34 @@ export async function diagnoseUserProfile(userId: string): Promise<void> {
             .single()
 
         if (specificError) {
-            console.error('❌ [DIAGNOSTIC] Erro ao buscar usuário específico:', specificError)
+            logger.error('[DIAGNOSTIC] Erro ao buscar usuário específico:', specificError)
 
             if (specificError.code === 'PGRST116') {
-                console.log('💡 [DIAGNOSTIC] Usuário não existe na tabela users')
-                console.log('🔧 [DIAGNOSTIC] SOLUÇÃO: Criar perfil manualmente ou verificar processo de registro')
+                logger.info('[DIAGNOSTIC] Usuário não existe na tabela users')
+                logger.info('[DIAGNOSTIC] SOLUÇÃO: Criar perfil manualmente ou verificar processo de registro')
             } else {
-                console.log('💡 [DIAGNOSTIC] Possível problema de RLS ou permissões')
+                logger.info('[DIAGNOSTIC] Possível problema de RLS ou permissões')
             }
         } else {
-            console.log('✅ [DIAGNOSTIC] Usuário encontrado:', {
+            logger.info('[DIAGNOSTIC] Usuário encontrado:', {
                 email: specificUser.email,
                 role: specificUser.role,
                 isActive: specificUser.is_active
             })
         }
 
-        console.log('🏁 [DIAGNOSTIC] FIM - Diagnóstico concluído')
+        logger.info('[DIAGNOSTIC] FIM - Diagnóstico concluído')
 
     } catch (error) {
-        console.error('❌ [DIAGNOSTIC] Erro durante diagnóstico:', error)
+        logger.error('[DIAGNOSTIC] Erro durante diagnóstico:', error)
     } finally {
-        console.log('🔄 [DIAGNOSTIC] Diagnóstico finalizado, retornando ao fluxo principal')
+        logger.debug('[DIAGNOSTIC] Diagnóstico finalizado, retornando ao fluxo principal')
     }
 }
 
 // Função para criar perfil manualmente se não existir
 export async function createMissingUserProfile(userId: string, email: string) {
-    console.log('🔨 [CREATE_PROFILE] Criando perfil faltante para:', email)
+    logger.info('[CREATE_PROFILE] Criando perfil faltante para:', email)
 
     try {
         const { data, error } = await supabase
@@ -91,14 +92,14 @@ export async function createMissingUserProfile(userId: string, email: string) {
             .single()
 
         if (error) {
-            console.error('❌ [CREATE_PROFILE] Erro ao criar perfil:', error)
+            logger.error('[CREATE_PROFILE] Erro ao criar perfil:', error)
             return null
         }
 
-        console.log('✅ [CREATE_PROFILE] Perfil criado com sucesso:', data)
+        logger.info('[CREATE_PROFILE] Perfil criado com sucesso:', data)
         return data
     } catch (error) {
-        console.error('❌ [CREATE_PROFILE] Erro inesperado ao criar perfil:', error)
+        logger.error('[CREATE_PROFILE] Erro inesperado ao criar perfil:', error)
         return null
     }
 }

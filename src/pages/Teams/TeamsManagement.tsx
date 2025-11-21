@@ -396,14 +396,26 @@ export const TeamsManagement: React.FC = () => {
 
                                     <div className="flex items-center space-x-2 ml-4">
                                         <button
-                                            onClick={() => navigate(`/teams/${team.id}/edit`)}
+                                            onClick={() => {
+                                                if (team.event?.status === 'completed') {
+                                                    alert('Não é possível editar equipes de eventos finalizados.');
+                                                    return
+                                                }
+                                                navigate(`/teams/${team.id}/edit`)
+                                            }}
                                             className="p-2 text-gray-600 hover:text-yellow-600 hover:bg-yellow-50 rounded-lg transition-colors"
                                             title="Editar equipe"
                                         >
                                             <Edit className="w-4 h-4" />
                                         </button>
                                         <button
-                                            onClick={() => handleDeleteTeam(team.id)}
+                                            onClick={() => {
+                                                if (team.event?.status === 'completed') {
+                                                    alert('Não é possível excluir equipes de eventos finalizados. Registros devem permanecer para histórico.');
+                                                    return
+                                                }
+                                                handleDeleteTeam(team.id)
+                                            }}
                                             className="p-2 text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                                             title="Excluir equipe"
                                         >

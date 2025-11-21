@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase'
+import logger from '../lib/logger'
 
 /**
  * Serviço para gerenciar buckets do Supabase Storage
@@ -21,7 +22,7 @@ export class BucketManagerService {
             const { data: buckets, error: listError } = await supabase.storage.listBuckets()
 
             if (listError) {
-                console.error('Erro ao listar buckets:', listError)
+                logger.error('Erro ao listar buckets:', listError)
                 return false
             }
 
@@ -29,12 +30,12 @@ export class BucketManagerService {
             const bucketExists = buckets?.some(bucket => bucket.id === bucketId)
 
             if (bucketExists) {
-                console.log(`Bucket ${bucketId} já existe`)
+                logger.debug(`Bucket ${bucketId} já existe`)
                 this.bucketCache.add(bucketId)
                 return true
             }
 
-            console.log(`Bucket ${bucketId} não existe. Tentando criar...`)
+            logger.debug(`Bucket ${bucketId} não existe. Tentando criar...`)
 
             // Tentar criar o bucket usando a API REST
             const { data, error: createError } = await supabase.storage.createBucket(bucketId, {
@@ -44,18 +45,18 @@ export class BucketManagerService {
             })
 
             if (createError) {
-                console.error(`Erro ao criar bucket ${bucketId}:`, createError)
+                logger.error(`Erro ao criar bucket ${bucketId}:`, createError)
 
                 // Se falhar, tentar uma abordagem alternativa via RPC
                 return await this.createBucketViaRPC(bucketId)
             }
 
-            console.log(`Bucket ${bucketId} criado com sucesso:`, data)
+            logger.info(`Bucket ${bucketId} criado com sucesso:`, data)
             this.bucketCache.add(bucketId)
             return true
 
         } catch (error) {
-            console.error(`Erro inesperado ao verificar/criar bucket ${bucketId}:`, error)
+            logger.error(`Erro inesperado ao verificar/criar bucket ${bucketId}:`, error)
             return false
         }
     }
@@ -65,7 +66,7 @@ export class BucketManagerService {
      */
     private static async createBucketViaRPC(bucketId: string): Promise<boolean> {
         try {
-            console.log(`Tentando criar bucket ${bucketId} via RPC...`)
+            logger.debug(`Tentando criar bucket ${bucketId} via RPC...`)
 
             // Chamar função personalizada que pode ter sido criada no Supabase
             const { data, error } = await supabase.rpc('create_bucket_if_not_exists', {
@@ -75,16 +76,15 @@ export class BucketManagerService {
             })
 
             if (error) {
-                console.error(`RPC para criar bucket falhou:`, error)
+                logger.error(`RPC para criar bucket falhou:`, error)
                 return false
             }
-
-            console.log(`Bucket ${bucketId} criado via RPC:`, data)
+            logger.info(`Bucket ${bucketId} criado via RPC:`, data)
             this.bucketCache.add(bucketId)
             return true
 
         } catch (error) {
-            console.error(`Erro ao criar bucket via RPC:`, error)
+            logger.error(`Erro ao criar bucket via RPC:`, error)
             return false
         }
     }
@@ -133,16 +133,16 @@ export class BucketManagerService {
                         .from(bucketId)
                         .getPublicUrl(data.path)
 
-                    console.log('Upload realizado com sucesso:', publicUrl)
+                    logger.info('Upload realizado com sucesso:', publicUrl)
                     return { url: publicUrl, isBase64: false }
                 }
 
-                console.error('Erro no upload após criar bucket:', error)
+                logger.error('Erro no upload após criar bucket:', error)
             }
 
             // Fallback para base64 se habilitado
             if (useBase64Fallback) {
-                console.log('Usando fallback base64 para imagem...')
+                logger.debug('Usando fallback base64 para imagem...')
                 const base64Url = await this.convertToBase64(file)
                 return { url: base64Url, isBase64: true }
             }
@@ -150,10 +150,10 @@ export class BucketManagerService {
             throw new Error('Upload falhou e fallback está desabilitado')
 
         } catch (error) {
-            console.error('Erro no upload com fallback:', error)
+            logger.error('Erro no upload com fallback:', error)
 
             if (useBase64Fallback) {
-                console.log('Usando fallback base64 após erro...')
+                logger.debug('Usando fallback base64 após erro...')
                 const base64Url = await this.convertToBase64(file)
                 return { url: base64Url, isBase64: true }
             }
@@ -167,7 +167,7 @@ export class BucketManagerService {
      */
     static clearBucketCache(): void {
         this.bucketCache.clear()
-        console.log('Cache de buckets limpo')
+        logger.debug('Cache de buckets limpo')
     }
 
     /**

@@ -40,6 +40,8 @@ export const ViewEventTermsModal: React.FC<ViewEventTermsModalProps> = ({
         return userResponses.find(response => response.questionId === questionId)
     }
 
+    const specialUserResponses = userResponses.filter(r => typeof r.questionId === 'string' && r.questionId.startsWith('__'))
+
     // Função para obter o texto da opção selecionada
     const getOptionText = (question: QuestionWithOptions, optionId: string) => {
         const option = question.options.find(opt => opt.id === optionId)
@@ -155,6 +157,45 @@ export const ViewEventTermsModal: React.FC<ViewEventTermsModalProps> = ({
 
                                 {/* Espaçamento extra para garantir scroll até o final */}
                                 <div className="h-8"></div>
+                            </div>
+                        )}
+
+                        {/* Respostas Especiais (ex.: veículo) */}
+                        {specialUserResponses.length > 0 && (
+                            <div>
+                                <h3 className="text-lg font-semibold text-gray-900 mb-4">🚗 Informações adicionais</h3>
+                                <div className="space-y-4">
+                                    {specialUserResponses.map((sr) => {
+                                        if (sr.questionId === '__vehicle_info') {
+                                            // tentamos parsear JSON estruturado, se houver
+                                            try {
+                                                const parsed = sr.textResponse ? JSON.parse(sr.textResponse) : null
+                                                if (parsed && typeof parsed === 'object') {
+                                                    return (
+                                                        <div key={sr.questionId} className="border border-gray-200 rounded-lg p-4 bg-gray-50">
+                                                            <h4 className="font-medium text-gray-900 mb-2">Veículo</h4>
+                                                            <div className="text-sm text-gray-700">
+                                                                {parsed.model && <div><strong>Modelo:</strong> {parsed.model}</div>}
+                                                                {parsed.plate && <div><strong>Placa:</strong> {parsed.plate}</div>}
+                                                                {parsed.notes && <div><strong>Observações:</strong> {parsed.notes}</div>}
+                                                            </div>
+                                                        </div>
+                                                    )
+                                                }
+                                            } catch (e) {
+                                                // cai para exibir como texto cru
+                                            }
+                                        }
+
+                                        // fallback: apresentar como texto simples
+                                        return (
+                                            <div key={sr.questionId} className="border border-gray-200 rounded-lg p-4 bg-gray-50">
+                                                <h4 className="font-medium text-gray-900 mb-2">{sr.questionId.replace('__', '')}</h4>
+                                                <div className="text-sm text-gray-700">{sr.textResponse}</div>
+                                            </div>
+                                        )
+                                    })}
+                                </div>
                             </div>
                         )}
                     </div>

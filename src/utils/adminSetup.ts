@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase'
 import { authService } from '../lib/services'
+import logger from '../lib/logger'
 import { diagnoseServerError, createAdminWithSafeFunction, checkAdminExistsWithFallback } from './serverErrorHandler'
 
 /**
@@ -14,49 +15,49 @@ const ADMIN_NAME = 'Administrador do Sistema'
 
 export const setupInitialAdmin = async () => {
     try {
-        console.log('🚀 Configurando administrador inicial...')
+        logger.info('Configurando administrador inicial...')
 
         // Primeiro, diagnosticar se há problemas de servidor
         const serverInfo = await diagnoseServerError()
 
         if (serverInfo.hasServerError) {
-            console.log('⚠️ Problema de servidor detectado:', serverInfo.errorType)
-            console.log('💡 Sugestões:')
+            logger.warn('Problema de servidor detectado:', serverInfo.errorType)
+            logger.info('Sugestões:')
             serverInfo.suggestions.forEach(suggestion => {
-                console.log(`   - ${suggestion}`)
+                logger.info(`   - ${suggestion}`)
             })
 
             // Se for problema de recursão, usar função segura imediatamente
             if (serverInfo.errorType === 'recursion') {
-                console.log('🔧 Recursão RLS detectada, usando função segura...')
+                logger.info('Recursão RLS detectada, usando função segura...')
 
                 const safeResult = await createAdminWithSafeFunction(ADMIN_EMAIL, ADMIN_PASSWORD, ADMIN_NAME)
 
                 if (safeResult.success) {
-                    console.log('✅ Administrador criado com função segura!')
-                    console.log('📧 Email:', ADMIN_EMAIL)
-                    console.log('🔑 Senha:', ADMIN_PASSWORD)
-                    console.log('⚠️  IMPORTANTE: Altere a senha no primeiro login!')
+                    logger.info('Administrador criado com função segura!')
+                    logger.info('Email:', ADMIN_EMAIL)
+                    logger.info('Senha:', ADMIN_PASSWORD)
+                    logger.info('IMPORTANTE: Altere a senha no primeiro login!')
                     return true
                 } else {
-                    console.error('❌ Erro na função segura:', safeResult.error)
+                    logger.error('Erro na função segura:', safeResult.error)
                     return false
                 }
             }
 
             if (!serverInfo.canProceed) {
-                console.log('🔧 Tentando função segura como alternativa...')
+                logger.info('Tentando função segura como alternativa...')
 
                 const safeResult = await createAdminWithSafeFunction(ADMIN_EMAIL, ADMIN_PASSWORD, ADMIN_NAME)
 
                 if (safeResult.success) {
-                    console.log('✅ Administrador criado com função segura!')
-                    console.log('📧 Email:', ADMIN_EMAIL)
-                    console.log('🔑 Senha:', ADMIN_PASSWORD)
-                    console.log('⚠️  IMPORTANTE: Altere a senha no primeiro login!')
+                    logger.info('Administrador criado com função segura!')
+                    logger.info('Email:', ADMIN_EMAIL)
+                    logger.info('Senha:', ADMIN_PASSWORD)
+                    logger.info('IMPORTANTE: Altere a senha no primeiro login!')
                     return true
                 } else {
-                    console.error('❌ Erro na função segura:', safeResult.error)
+                    logger.error('Erro na função segura:', safeResult.error)
                     return false
                 }
             }
@@ -71,11 +72,11 @@ export const setupInitialAdmin = async () => {
                 .limit(1)
 
             if (checkError) {
-                console.error('❌ Erro ao verificar administradores existentes:', checkError)
+                logger.error('Erro ao verificar administradores existentes:', checkError)
 
                 // Se é erro de recursão, usar função segura
                 if (checkError.message?.includes('infinite recursion')) {
-                    console.log('🔧 Recursão detectada, usando função segura...')
+                    logger.info('Recursão detectada, usando função segura...')
                     const safeResult = await createAdminWithSafeFunction(ADMIN_EMAIL, ADMIN_PASSWORD, ADMIN_NAME)
                     return safeResult.success
                 }
@@ -85,7 +86,7 @@ export const setupInitialAdmin = async () => {
                 const fallbackCheck = await checkAdminExistsWithFallback(ADMIN_EMAIL)
 
                 if (fallbackCheck.exists && fallbackCheck.isAdmin) {
-                    console.log('✅ Administrador já existe (verificado via método alternativo)')
+                    logger.info('Administrador já existe (verificado via método alternativo)')
                     return true
                 } else {
                     // Usar função segura
@@ -95,15 +96,15 @@ export const setupInitialAdmin = async () => {
             }
 
             if (existingUsers && existingUsers.length > 0) {
-                console.log('✅ Administrador já existe:', existingUsers[0].email)
+                logger.info('Administrador já existe:', existingUsers[0].email)
                 return true
             }
         } catch (dbError) {
-            console.error('❌ Erro de banco ao verificar admin existente:', dbError)
+            logger.error('Erro de banco ao verificar admin existente:', dbError)
 
             // Se é erro de recursão, usar função segura
             if (dbError instanceof Error && dbError.message?.includes('infinite recursion')) {
-                console.log('🔧 Recursão detectada no catch, usando função segura...')
+                logger.info('Recursão detectada no catch, usando função segura...')
                 const safeResult = await createAdminWithSafeFunction(ADMIN_EMAIL, ADMIN_PASSWORD, ADMIN_NAME)
                 return safeResult.success
             }
@@ -118,7 +119,7 @@ export const setupInitialAdmin = async () => {
             const { data: authUsers, error: authError } = await supabase.auth.admin.listUsers()
 
             if (authError) {
-                console.error('❌ Erro ao listar usuários de autenticação:', authError)
+                logger.error('Erro ao listar usuários de autenticação:', authError)
 
                 // Usar função segura
                 const safeResult = await createAdminWithSafeFunction(ADMIN_EMAIL, ADMIN_PASSWORD, ADMIN_NAME)
@@ -128,7 +129,7 @@ export const setupInitialAdmin = async () => {
             const existingAuthUser = authUsers.users.find(user => user.email === ADMIN_EMAIL)
 
             if (existingAuthUser) {
-                console.log('👤 Usuário encontrado na auth, configurando perfil com função segura...')
+                logger.info('Usuário encontrado na auth, configurando perfil com função segura...')
 
                 // Usar função segura diretamente
                 const { data: result, error: functionError } = await supabase
@@ -139,22 +140,22 @@ export const setupInitialAdmin = async () => {
                     })
 
                 if (functionError) {
-                    console.error('❌ Erro ao chamar função segura:', functionError)
+                    logger.error('Erro ao chamar função segura:', functionError)
                     return false
                 }
 
                 const functionResult = result as { success: boolean; message?: string; error?: string }
 
                 if (functionResult.success) {
-                    console.log('✅ Perfil de administrador configurado com função segura!')
+                    logger.info('Perfil de administrador configurado com função segura!')
                     return true
                 } else {
-                    console.error('❌ Função segura retornou erro:', functionResult.error)
+                    logger.error('Função segura retornou erro:', functionResult.error)
                     return false
                 }
             }
         } catch (authError) {
-            console.error('❌ Erro ao verificar auth users:', authError)
+            logger.error('Erro ao verificar auth users:', authError)
 
             // Usar função segura
             const safeResult = await createAdminWithSafeFunction(ADMIN_EMAIL, ADMIN_PASSWORD, ADMIN_NAME)
@@ -162,37 +163,37 @@ export const setupInitialAdmin = async () => {
         }
 
         // Criar novo usuário administrador
-        console.log('👤 Criando novo usuário administrador...')
+        logger.info('Criando novo usuário administrador...')
 
         try {
             // Tentar primeiro com função segura
             const safeResult = await createAdminWithSafeFunction(ADMIN_EMAIL, ADMIN_PASSWORD, ADMIN_NAME)
 
             if (safeResult.success) {
-                console.log('✅ Administrador criado com função segura!')
-                console.log('📧 Email:', ADMIN_EMAIL)
-                console.log('🔑 Senha:', ADMIN_PASSWORD)
-                console.log('⚠️  IMPORTANTE: Altere a senha no primeiro login!')
+                logger.info('Administrador criado com função segura!')
+                logger.info('Email:', ADMIN_EMAIL)
+                logger.info('Senha:', ADMIN_PASSWORD)
+                logger.info('IMPORTANTE: Altere a senha no primeiro login!')
                 return true
             } else {
-                console.log('⚠️ Função segura falhou, tentando método tradicional...')
+                logger.warn('Função segura falhou, tentando método tradicional...')
 
                 // Fallback para método tradicional
                 const adminId = await authService.createAdmin(ADMIN_EMAIL, ADMIN_PASSWORD, ADMIN_NAME)
 
                 if (adminId) {
-                    console.log('✅ Administrador criado com método tradicional!')
-                    console.log('📧 Email:', ADMIN_EMAIL)
-                    console.log('🔑 Senha:', ADMIN_PASSWORD)
-                    console.log('⚠️  IMPORTANTE: Altere a senha no primeiro login!')
+                    logger.info('Administrador criado com método tradicional!')
+                    logger.info('Email:', ADMIN_EMAIL)
+                    logger.info('Senha:', ADMIN_PASSWORD)
+                    logger.info('IMPORTANTE: Altere a senha no primeiro login!')
                     return true
                 } else {
-                    console.error('❌ Ambos os métodos falharam')
+                    logger.error('Ambos os métodos falharam')
                     return false
                 }
             }
         } catch (createError) {
-            console.error('❌ Erro ao criar admin:', createError)
+            logger.error('Erro ao criar admin:', createError)
 
             // Último recurso: função segura
             const safeResult = await createAdminWithSafeFunction(ADMIN_EMAIL, ADMIN_PASSWORD, ADMIN_NAME)
@@ -200,15 +201,15 @@ export const setupInitialAdmin = async () => {
         }
 
     } catch (error) {
-        console.error('❌ Erro inesperado:', error)
+        logger.error('Erro inesperado:', error)
 
         // Último recurso: função segura
-        console.log('🔧 Erro inesperado, tentando função segura...')
+        logger.info('Erro inesperado, tentando função segura...')
         try {
             const safeResult = await createAdminWithSafeFunction(ADMIN_EMAIL, ADMIN_PASSWORD, ADMIN_NAME)
             return safeResult.success
         } catch (fallbackError) {
-            console.error('❌ Falha total - todos os métodos falharam:', fallbackError)
+            logger.error('Falha total - todos os métodos falharam:', fallbackError)
             return false
         }
     }
@@ -217,36 +218,36 @@ export const setupInitialAdmin = async () => {
 // Função para verificar status do administrador
 export const checkAdminStatus = async () => {
     try {
-        console.log('🔍 Verificando status do administrador...')
+        logger.info('Verificando status do administrador...')
 
         // Primeiro, diagnosticar problemas de servidor
         const serverInfo = await diagnoseServerError()
 
         if (serverInfo.hasServerError && !serverInfo.canProceed) {
-            console.log('⚠️ Problema de servidor detectado, usando método alternativo...')
+            logger.warn('Problema de servidor detectado, usando método alternativo...')
 
             const fallbackCheck = await checkAdminExistsWithFallback(ADMIN_EMAIL)
 
             if (fallbackCheck.error) {
-                console.error('❌ Erro no método alternativo:', fallbackCheck.error)
+                logger.error('Erro no método alternativo:', fallbackCheck.error)
                 return false
             }
 
-            console.log('\n📊 STATUS DO ADMINISTRADOR (Método Alternativo):')
-            console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+            logger.info('\nSTATUS DO ADMINISTRADOR (Método Alternativo):')
+            logger.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
 
             if (fallbackCheck.exists) {
-                console.log('✅ Usuário existe na autenticação')
-                console.log('🎭 É Admin:', fallbackCheck.isAdmin ? '✅ Sim' : '❌ Não')
+                logger.info('Usuário existe na autenticação')
+                logger.info('É Admin:', fallbackCheck.isAdmin ? 'Sim' : 'Não')
 
                 if (fallbackCheck.needsProfileCreation) {
-                    console.log('⚠️ Perfil precisa ser criado na tabela users')
+                    logger.warn('Perfil precisa ser criado na tabela users')
                     return false
                 }
 
                 return fallbackCheck.isAdmin
             } else {
-                console.log('❌ Administrador não existe')
+                logger.info('Administrador não existe')
                 return false
             }
         }
@@ -312,63 +313,63 @@ export const checkAdminStatus = async () => {
             return fallbackCheck.exists && fallbackCheck.isAdmin
         }
 
-        console.log('\n📊 STATUS DO ADMINISTRADOR:')
-        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+        logger.info('\nSTATUS DO ADMINISTRADOR:')
+        logger.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
 
         if (authUser) {
-            console.log('✅ Usuário existe na autenticação')
-            console.log('📧 Email:', authUser.email)
-            console.log('🆔 ID:', authUser.id)
-            console.log('📅 Criado em:', new Date(authUser.created_at).toLocaleString('pt-BR'))
-            console.log('✉️  Email confirmado:', authUser.email_confirmed_at ? '✅ Sim' : '❌ Não')
+            logger.info('Usuário existe na autenticação')
+            logger.info('Email:', authUser.email)
+            logger.info('ID:', authUser.id)
+            logger.info('Criado em:', new Date(authUser.created_at).toLocaleString('pt-BR'))
+            logger.info('Email confirmado:', authUser.email_confirmed_at ? 'Sim' : 'Não')
         } else {
             console.log('❌ Usuário NÃO existe na autenticação')
         }
 
         if (users) {
-            console.log('✅ Perfil existe na tabela users')
-            console.log('👤 Nome:', users.full_name)
-            console.log('🎭 Role:', users.role)
-            console.log('🏃 Primeiro login:', users.is_first_login ? '⏳ Pendente' : '✅ Concluído')
-            console.log('💼 Ativo:', users.is_active ? '✅ Sim' : '❌ Não')
+            logger.info('Perfil existe na tabela users')
+            logger.info('Nome:', users.full_name)
+            logger.info('Role:', users.role)
+            logger.info('Primeiro login:', users.is_first_login ? 'Pendente' : 'Concluído')
+            logger.info('Ativo:', users.is_active ? 'Sim' : 'Não')
         } else {
             console.log('❌ Perfil NÃO existe na tabela users')
         }
 
-        console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n')
+        logger.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n')
 
         // Verificar se precisa corrigir
         if (authUser && !users) {
-            console.log('🔧 Usuário existe na auth mas não tem perfil. Execute setupInitialAdmin() para corrigir.')
+            logger.info('Usuário existe na auth mas não tem perfil. Execute setupInitialAdmin() para corrigir.')
             return false
         }
 
         if (!authUser && !users) {
-            console.log('🔧 Administrador não existe. Execute setupInitialAdmin() para criar.')
+            logger.info('Administrador não existe. Execute setupInitialAdmin() para criar.')
             return false
         }
 
         if (authUser && users && users.role === 'admin') {
-            console.log('✅ Administrador configurado corretamente!')
+            logger.info('Administrador configurado corretamente!')
             return true
         }
 
         return false
 
     } catch (error) {
-        console.error('❌ Erro ao verificar status:', error)
+        logger.error('Erro ao verificar status:', error)
 
         // Tentar método alternativo em caso de erro (exceto recursão)
         try {
             if (error instanceof Error && error.message?.includes('infinite recursion')) {
-                console.log('🔧 Recursão detectada, não é possível verificar status completamente')
+                logger.info('Recursão detectada, não é possível verificar status completamente')
                 return false
             }
 
             const fallbackCheck = await checkAdminExistsWithFallback(ADMIN_EMAIL)
             return fallbackCheck.exists && fallbackCheck.isAdmin
         } catch (fallbackError) {
-            console.error('❌ Falha total na verificação:', fallbackError)
+            logger.error('Falha total na verificação:', fallbackError)
             return false
         }
     }
@@ -377,7 +378,7 @@ export const checkAdminStatus = async () => {
 // Função para reset do administrador (usar com cuidado)
 export const resetAdmin = async () => {
     try {
-        console.log('⚠️  RESETANDO administrador...')
+        logger.warn('RESETANDO administrador...')
 
         // Remover da tabela users
         const { error: deleteError } = await supabase
@@ -386,9 +387,9 @@ export const resetAdmin = async () => {
             .eq('email', ADMIN_EMAIL)
 
         if (deleteError) {
-            console.error('❌ Erro ao remover perfil:', deleteError)
+            logger.error('Erro ao remover perfil:', deleteError)
         } else {
-            console.log('✅ Perfil removido')
+            logger.info('Perfil removido')
         }
 
         // Remover da auth (requer privilégios admin)
@@ -399,17 +400,17 @@ export const resetAdmin = async () => {
             if (authUser) {
                 const { error: deleteAuthError } = await supabase.auth.admin.deleteUser(authUser.id)
                 if (deleteAuthError) {
-                    console.error('❌ Erro ao remover usuário da auth:', deleteAuthError)
+                    logger.error('Erro ao remover usuário da auth:', deleteAuthError)
                 } else {
-                    console.log('✅ Usuário removido da auth')
+                    logger.info('Usuário removido da auth')
                 }
             }
         }
 
-        console.log('✅ Reset concluído. Execute setupInitialAdmin() para recriar.')
+        logger.info('Reset concluído. Execute setupInitialAdmin() para recriar.')
 
     } catch (error) {
-        console.error('❌ Erro no reset:', error)
+        logger.error('Erro no reset:', error)
     }
 }
 
@@ -422,6 +423,6 @@ if (typeof window !== 'undefined' && window.location) {
         reset: resetAdmin
     }
 
-    console.log('🛠️  Admin Utils carregados!')
-    console.log('Use: adminUtils.setup(), adminUtils.check(), ou adminUtils.reset()')
+    logger.info('Admin Utils carregados!')
+    logger.info('Use: adminUtils.setup(), adminUtils.check(), ou adminUtils.reset()')
 }

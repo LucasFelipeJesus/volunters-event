@@ -8,6 +8,7 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '../../hooks/useAuth'
 import { supabase } from '../../lib/supabase'
+import { userService, authService } from '../../lib/services'
 import {
     User,
     Star,
@@ -85,7 +86,7 @@ export const AdminUsersManagement: React.FC = () => {
     const [filteredUsers, setFilteredUsers] = useState<UserProfile[]>([])
     const [loading, setLoading] = useState(true)
     const [searchTerm, setSearchTerm] = useState('')
-    const [filterRole, setFilterRole] = useState<'all' | 'volunteer' | 'captain'>('all')
+    const [filterRole, setFilterRole] = useState<'all' | 'volunteer' | 'captain' | 'admin'>('all')
     const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null)
     const [showUserDetails, setShowUserDetails] = useState(false)
     const [userEvaluations, setUserEvaluations] = useState<(Evaluation | AdminEvaluation)[]>([])
@@ -163,7 +164,7 @@ export const AdminUsersManagement: React.FC = () => {
                         )
                     )
                 `)
-                .neq('role', 'admin')
+                // Remover filtro que excluía admins para permitir gerenciamento completo
                 .order('created_at', { ascending: false })
 
             if (error) throw error
@@ -213,6 +214,39 @@ export const AdminUsersManagement: React.FC = () => {
         }
     }
 
+    const promoteToAdmin = async (userId: string, email?: string, fullName?: string) => {
+        if (!confirm('Tem certeza que deseja conceder privilégios de administrador a este usuário?')) return
+        try {
+            const success = await authService.setupAdminProfile(userId, email || '', fullName || '')
+            if (success) {
+                alert('Usuário promovido a administrador com sucesso!')
+                fetchUsers()
+            } else {
+                alert('Erro ao promover usuário a administrador')
+            }
+        } catch (error) {
+            console.error('Erro ao promover usuário a admin:', error)
+            alert('Erro ao promover usuário a administrador')
+        }
+    }
+
+    const demoteFromAdmin = async (userId: string) => {
+        if (!confirm('Tem certeza que deseja remover privilégios de administrador deste usuário?')) return
+        try {
+
+            const success = await userService.deleteAccount(userId)
+            if (success) {
+                alert('Usuário inativado com sucesso')
+                fetchUsers()
+            } else {
+                alert('Erro ao inativar usuário - verifique logs')
+            }
+        } catch (error) {
+            console.error('Erro ao excluir usuário:', error)
+            alert('Erro ao inativar usuário')
+        }
+    }
+
     const demoteToVolunteer = async (userId: string) => {
         try {
             const success = await demoteUser(userId)
@@ -248,13 +282,58 @@ export const AdminUsersManagement: React.FC = () => {
     }
 
     const reactivateUser = async (userId: string) => {
-        try {
-            const { error } = await supabase
-                .from('users')
-                .update({ is_active: true })
-                .eq('id', userId)
+        if (!confirm('Tem certeza que deseja reativar este usuário?')) return
 
-            if (error) throw error
+        try {
+            // Buscar email atual do usuário
+            const { data: userData, error: selectError } = await supabase
+                .from('users')
+                .select('email')
+                .eq('id', userId)
+                .single()
+
+            if (selectError) throw selectError
+
+            const currentEmail: string = userData?.email || ''
+
+            // Detecta padrão adicionado pela função delete_user_account: email || '_deleted_' || epoch
+            const m = currentEmail.match(/^(.*)_deleted_\d+$/)
+
+            if (m) {
+                const originalEmail = m[1]
+
+                // Tenta restaurar email e reativar em uma única operação
+                const { error: updateErr } = await supabase
+                    .from('users')
+                    .update({ is_active: true, email: originalEmail })
+                    .eq('id', userId)
+
+                if (updateErr) {
+                    // Possível conflito de email único — reativa sem alterar email e avisa o admin
+                    if (updateErr.code === '23505' || (updateErr.message && updateErr.message.toLowerCase().includes('duplicate'))) {
+                        const { error: onlyActiveErr } = await supabase
+                            .from('users')
+                            .update({ is_active: true })
+                            .eq('id', userId)
+
+                        if (onlyActiveErr) throw onlyActiveErr
+
+                        alert('Usuário reativado, mas não foi possível restaurar o email original porque já existe outro perfil com esse email. Corrija manualmente, se necessário.')
+                        fetchUsers()
+                        return
+                    }
+
+                    throw updateErr
+                }
+            } else {
+                // Email não foi modificado pelo soft-delete — apenas reativa
+                const { error: activeErr } = await supabase
+                    .from('users')
+                    .update({ is_active: true })
+                    .eq('id', userId)
+
+                if (activeErr) throw activeErr
+            }
 
             alert('Usuário reativado com sucesso!')
             fetchUsers()
@@ -383,13 +462,14 @@ export const AdminUsersManagement: React.FC = () => {
                             <Filter className="w-4 h-4 text-gray-400" />
                             <select
                                 value={filterRole}
-                                onChange={(e) => setFilterRole(e.target.value as 'all' | 'volunteer' | 'captain')}
+                                onChange={(e) => setFilterRole(e.target.value as 'all' | 'volunteer' | 'captain' | 'admin')}
                                 className="border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                                 title="Filtrar por tipo de usuário"
                             >
                                 <option value="all">Todos os tipos</option>
                                 <option value="volunteer">Voluntários</option>
                                 <option value="captain">Capitães</option>
+                                <option value="admin">Administradores</option>
                             </select>
                         </div>
                         <div className="text-sm text-gray-600 bg-gray-100 px-3 py-2 rounded-lg">
@@ -559,6 +639,33 @@ export const AdminUsersManagement: React.FC = () => {
                                                                         </button>
                                                                     )}
 
+                                                                    {/* Ações de admin: promover/demover administrador */}
+                                                                    {userData.role !== 'admin' && (
+                                                                        <button
+                                                                            onClick={() => {
+                                                                                promoteToAdmin(userData.id, userData.email, userData.full_name)
+                                                                                setActionMenuOpen(null)
+                                                                            }}
+                                                                            className="w-full text-left px-4 py-2 text-sm text-yellow-700 hover:bg-yellow-50 flex items-center space-x-2"
+                                                                        >
+                                                                            <Shield className="w-4 h-4" />
+                                                                            <span>Promover a Administrador</span>
+                                                                        </button>
+                                                                    )}
+
+                                                                    {userData.role === 'admin' && user?.id !== userData.id && (
+                                                                        <button
+                                                                            onClick={() => {
+                                                                                demoteFromAdmin(userData.id)
+                                                                                setActionMenuOpen(null)
+                                                                            }}
+                                                                            className="w-full text-left px-4 py-2 text-sm text-orange-700 hover:bg-orange-50 flex items-center space-x-2"
+                                                                        >
+                                                                            <Crown className="w-4 h-4" />
+                                                                            <span>Remover Privilégios de Admin</span>
+                                                                        </button>
+                                                                    )}
+
                                                                     {userData.is_active ? (
                                                                         <button
                                                                             onClick={() => {
@@ -582,6 +689,8 @@ export const AdminUsersManagement: React.FC = () => {
                                                                             <span>Reativar</span>
                                                                         </button>
                                                                     )}
+
+                                                                    {/* botão redundante de inativação removido — usar 'Desativar' acima */}
                                                                 </div>
                                                             </div>
                                                         )}

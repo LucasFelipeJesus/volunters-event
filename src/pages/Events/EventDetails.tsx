@@ -331,6 +331,20 @@ export const EventDetails: React.FC = () => {
                 } catch (error) {
                     console.error('❌ Erro ao demover capitães após finalização do evento:', error)
                 }
+
+                // Marcar equipes deste evento como finalizadas (status 'finished')
+                try {
+                    const { error: teamsError } = await supabase
+                        .from('teams')
+                        .update({ status: 'finished', updated_at: new Date().toISOString() })
+                        .in('id', teamIds)
+
+                    if (teamsError) {
+                        console.error('Erro ao marcar equipes como finalizadas:', teamsError)
+                    }
+                } catch (err) {
+                    console.error('Erro inesperado ao finalizar equipes:', err)
+                }
             }
 
             setSuccess('Evento atualizado com sucesso!')

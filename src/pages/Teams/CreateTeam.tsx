@@ -47,6 +47,8 @@ export const CreateTeam: React.FC = () => {
         max_volunteers: 5
     })
 
+    const [markComplete, setMarkComplete] = useState(false)
+
     const [errors, setErrors] = useState<Record<string, string>>({})
 
     // Carregar dados iniciais
@@ -94,14 +96,30 @@ export const CreateTeam: React.FC = () => {
 
             setLoadingVolunteers(true)
             try {
-                // Como não há sistema de inscrições, buscar todos os voluntários ativos
-                // excluindo aqueles já alocados em outras equipes deste evento
-                const { data: allVolunteersData } = await supabase
-                    .from('users')
-                    .select('id, full_name, email, role')
-                    .eq('role', 'volunteer')
-                    .eq('is_active', true)
-                    .order('full_name')
+                // Buscar voluntários inscritos no evento (event_registrations)
+                // Consideramos status 'confirmed' e 'pending' como inscritos
+                const { data: registrationsData, error: regsError } = await supabase
+                    .from('event_registrations')
+                    .select('user:users(id, full_name, email, role, is_active), status')
+                    .eq('event_id', formData.event_id)
+                    .in('status', ['confirmed', 'pending'])
+
+                if (regsError) {
+                    throw regsError
+                }
+
+                // Extrair apenas os usuários ativos com role 'volunteer' ou 'captain'
+                const allVolunteersData = (registrationsData || [])
+                    .map((r: any) => r.user)
+                    .filter((u: any) => u && (u.role === 'volunteer' || u.role === 'captain') && u.is_active)
+
+                // Extrair capitães inscritos neste evento (para preencher a seleção de capitão)
+                const captainsFromRegs = (registrationsData || [])
+                    .map((r: any) => r.user)
+                    .filter((u: any) => u && u.role === 'captain' && u.is_active)
+
+                // Atualiza a lista de capitães exibida no formulário (apenas os inscritos no evento)
+                setCaptains(captainsFromRegs || [])
 
                 // Buscar voluntários já alocados em equipes deste evento
                 const { data: allocatedVolunteersData } = await supabase
@@ -118,9 +136,9 @@ export const CreateTeam: React.FC = () => {
 
                 // Filtrar voluntários disponíveis (não estão em outras equipes deste evento)
                 const allocatedVolunteerIds = allocatedVolunteersData?.map(member => member.user_id) || []
-                const availableVolunteers = allVolunteersData?.filter(
-                    volunteer => !allocatedVolunteerIds.includes(volunteer.id)
-                ) || []
+                const availableVolunteers = (allVolunteersData || []).filter(
+                    (volunteer: any) => !allocatedVolunteerIds.includes(volunteer.id)
+                )
 
                 setEventVolunteers(availableVolunteers)                // Limpar seleção anterior quando trocar de evento
                 setSelectedVolunteers([])
@@ -215,6 +233,8 @@ export const CreateTeam: React.FC = () => {
 
         try {
             // 1. Criar a equipe
+            const initialStatus = markComplete ? 'complete' : 'forming'
+
             const { data: team, error: teamError } = await supabase
                 .from('teams')
                 .insert({
@@ -222,8 +242,8 @@ export const CreateTeam: React.FC = () => {
                     event_id: formData.event_id,
                     captain_id: formData.captain_id,
                     max_volunteers: formData.max_volunteers,
-                    current_volunteers: selectedVolunteers.length + 1, // +1 para o capitão
-                    status: 'complete',
+                    current_volunteers: 0, // será atualizado após inserir membros
+                    status: initialStatus,
                     created_by: user?.id
                 })
                 .select()
@@ -255,12 +275,16 @@ export const CreateTeam: React.FC = () => {
             }
 
             // 3. Adicionar voluntários selecionados
-            const volunteerInserts = selectedVolunteers.map(volunteerId => ({
-                team_id: team.id,
-                user_id: volunteerId,
-                role_in_team: 'volunteer',
-                status: 'active'
-            }))
+            const volunteerInserts = selectedVolunteers.map(volunteerId => {
+                const user = (eventVolunteers || []).find((v: any) => v.id === volunteerId) || captains.find(c => c.id === volunteerId)
+                const roleInTeam = user && user.role === 'captain' ? 'captain' : 'volunteer'
+                return {
+                    team_id: team.id,
+                    user_id: volunteerId,
+                    role_in_team: roleInTeam,
+                    status: 'active'
+                }
+            })
 
             if (volunteerInserts.length > 0) {
                 const { error: volunteersError } = await supabase
@@ -270,6 +294,59 @@ export const CreateTeam: React.FC = () => {
                 if (volunteersError) {
                     throw volunteersError
                 }
+            }
+
+            // Atualizar contagem real de membros ativos na equipe
+            try {
+                const { data: activeMembers } = await supabase
+                    .from('team_members')
+                    .select('id')
+                    .eq('team_id', team.id)
+                    .eq('status', 'active')
+
+                const realCount = (activeMembers || []).length || 0
+                const { error: updateCountError } = await supabase
+                    .from('teams')
+                    .update({ current_volunteers: realCount })
+                    .eq('id', team.id)
+
+                if (updateCountError) {
+                    console.warn('Não foi possível atualizar current_volunteers:', updateCountError)
+                }
+            } catch (err) {
+                console.warn('Erro ao calcular contagem real de membros:', err)
+            }
+
+            // Se a equipe foi criada como 'forming', mas o usuário marcou para completar
+            // (ou a equipe atingiu o número máximo imediatamente), podemos atualizar
+            // o status para 'complete'. Aqui respeitamos a escolha do admin.
+            try {
+                if (!markComplete) {
+                    // se o admin não marcou como completa, não forçamos alteração
+                } else {
+                    // só permitimos marcar como complete se houver pelo menos 1 membro ativo
+                    const { data: activeMembersCheck } = await supabase
+                        .from('team_members')
+                        .select('id')
+                        .eq('team_id', team.id)
+                        .eq('status', 'active')
+
+                    const realCountCheck = (activeMembersCheck || []).length || 0
+                    if (realCountCheck < 1) {
+                        setErrors({ submit: 'Não é possível marcar como completa: a equipe precisa ter pelo menos 1 membro ativo.' })
+                    } else {
+                        const { error: setCompleteError } = await supabase
+                            .from('teams')
+                            .update({ status: 'complete', updated_at: new Date().toISOString() })
+                            .eq('id', team.id)
+
+                        if (setCompleteError) {
+                            console.warn('Não foi possível marcar equipe como completa:', setCompleteError)
+                        }
+                    }
+                }
+            } catch (err) {
+                console.warn('Erro ao setar status final da equipe:', err)
             }
 
             // 4. Criar notificação personalizada (simulada via console por enquanto)
@@ -410,6 +487,18 @@ export const CreateTeam: React.FC = () => {
                             />
                             {errors.max_volunteers && <p className="text-red-600 text-sm mt-1">{errors.max_volunteers}</p>}
                         </div>
+                    </div>
+
+                    <div className="mt-4">
+                        <label className="inline-flex items-center">
+                            <input
+                                type="checkbox"
+                                checked={markComplete}
+                                onChange={(e) => setMarkComplete(e.target.checked)}
+                                className="form-checkbox h-4 w-4 text-blue-600"
+                            />
+                            <span className="ml-2 text-sm text-gray-700">Marcar equipe como completa ao criar</span>
+                        </label>
                     </div>
 
                     <div className="mt-6">

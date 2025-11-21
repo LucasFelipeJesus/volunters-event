@@ -65,9 +65,36 @@ const AvaliarEquipe: React.FC = () => {
         const fetchData = async () => {
             setLoading(true);
             try {
-                // Buscar equipes onde o usuário é capitão e o evento está completed
-
                 if (!user?.id) throw new Error('Usuário não autenticado');
+
+                // Primeiro tente usar o RPC seguro (recomendado) — função criada nas migrations
+                try {
+                    const { data: rpcData, error: rpcError } = await supabase.rpc('get_team_members_for_captain', { captain_id_param: user.id });
+                    if (!rpcError && rpcData) {
+                        // rpcData: array of rows (one per member)
+                        const rows = rpcData as Array<any>;
+                        const grouped: Record<string, TeamEvent> = {};
+                        rows.forEach(r => {
+                            const key = `${r.team_id}-${r.event_id}`;
+                            if (!grouped[key]) grouped[key] = {
+                                event_id: r.event_id,
+                                event_title: r.event_title,
+                                event_date: r.event_date,
+                                team_id: r.team_id,
+                                team_name: r.team_name,
+                                members: []
+                            };
+                            grouped[key].members.push({ id: r.member_id, full_name: r.member_full_name, email: r.member_email });
+                        });
+                        setTeamEvents(Object.values(grouped));
+                        return;
+                    }
+                } catch (rpcErr) {
+                    // se RPC falhar, vamos tentar o fallback cliente (pode ser bloqueado por RLS)
+                    console.warn('RPC get_team_members_for_captain falhou, usando fallback:', rpcErr);
+                }
+
+                // Fallback: consulta direta (pode falhar por RLS dependendo das políticas)
                 const { data, error } = await supabase
                     .from('teams')
                     .select(`
@@ -82,6 +109,7 @@ const AvaliarEquipe: React.FC = () => {
             )
           `)
                     .eq('captain_id', user.id)
+                    .in('status', ['active', 'forming', 'finished'])
                     .order('created_at', { ascending: false });
 
                 if (error) throw error;
@@ -109,7 +137,7 @@ const AvaliarEquipe: React.FC = () => {
                 };
 
                 const filtered: TeamEvent[] = ((data as unknown) as SupabaseTeam[] || [])
-                    .filter((team) => team.event && team.event.status === 'completed')
+                    .filter((team) => team.event && (team.event.status === 'completed' || team.event.status === 'finished'))
                     .map((team) => ({
                         event_id: team.event.id,
                         event_title: team.event.title,
@@ -117,7 +145,7 @@ const AvaliarEquipe: React.FC = () => {
                         team_id: team.id,
                         team_name: team.name,
                         members: (team.members || [])
-                            .filter((m) => m.role_in_team === 'volunteer' && m.status === 'active' && m.user)
+                            .filter((m) => m.role_in_team === 'volunteer' && (m.status === 'active' || m.status === 'inactive') && m.user)
                             .map((m) => ({
                                 id: m.user!.id,
                                 full_name: m.user!.full_name,

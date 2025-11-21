@@ -80,11 +80,11 @@ export const EditTeam: React.FC = () => {
   useEffect(() => {
     const fetchAvailableVolunteers = async () => {
       if (!team?.event_id) return;
-      // Buscar todos voluntários ativos
+      // Buscar todos voluntários e capitães ativos (participantes do evento)
       const { data: allVolunteers } = await supabase
         .from('users')
         .select('id, full_name, email, role')
-        .eq('role', 'volunteer')
+        .in('role', ['volunteer', 'captain'])
         .eq('is_active', true);
 
       // Buscar IDs das equipes deste evento
@@ -121,23 +121,31 @@ export const EditTeam: React.FC = () => {
   const handleAddVolunteer = async () => {
     if (!selectedVolunteerId || !team) return;
     setError(null);
+    if (team.event?.status === 'completed') {
+      setError('Não é possível adicionar voluntários: o evento já foi finalizado.')
+      return
+    }
     try {
       // Verifica se já existe registro para esse user_id nesta equipe
       const existing = team.members?.find((m) => m.user_id === selectedVolunteerId);
       if (existing) {
         // Se já existe, apenas reativa
+        const user = (availableVolunteers || []).find(v => v.id === selectedVolunteerId)
+        const roleInTeam = user && user.role === 'captain' ? 'captain' : 'volunteer'
         await supabase
           .from('team_members')
-          .update({ status: 'active', left_at: null })
+          .update({ status: 'active', left_at: null, role_in_team: roleInTeam })
           .eq('id', existing.id);
       } else {
         // Se não existe, cria novo
+        const user = (availableVolunteers || []).find(v => v.id === selectedVolunteerId)
+        const roleInTeam = user && user.role === 'captain' ? 'captain' : 'volunteer'
         await supabase
           .from('team_members')
           .insert({
             team_id: team.id,
             user_id: selectedVolunteerId,
-            role_in_team: 'volunteer',
+            role_in_team: roleInTeam,
             status: 'active',
             joined_at: new Date().toISOString()
           });
@@ -197,6 +205,11 @@ export const EditTeam: React.FC = () => {
     try {
       setError(null)
 
+      if (team?.event?.status === 'completed') {
+        setError('Não é possível editar esta equipe: o evento associado já foi finalizado.')
+        return
+      }
+
       // Validações básicas
       if (!editData.name) {
         throw new Error('Nome da equipe é obrigatório')
@@ -236,8 +249,48 @@ export const EditTeam: React.FC = () => {
     }
   }
 
+  const handleMarkComplete = async () => {
+    if (!team) return
+    if (!window.confirm('Marcar esta equipe como completa? Esta ação não pode ser desfeita facilmente.')) return
+
+    try {
+      setError(null)
+      // Verifica contagem de membros ativos antes de marcar como 'complete'
+      const { data: activeMembers } = await supabase
+        .from('team_members')
+        .select('id')
+        .eq('team_id', team.id)
+        .eq('status', 'active')
+
+      const activeCount = (activeMembers || []).length || 0
+      if (activeCount < 1) {
+        setError('Não é possível marcar como completa: a equipe precisa ter pelo menos 1 membro ativo.')
+        return
+      }
+
+      // Atualiza status para 'complete'
+      const { error } = await supabase
+        .from('teams')
+        .update({ status: 'complete', updated_at: new Date().toISOString() })
+        .eq('id', team.id)
+
+      if (error) throw error
+
+      setSuccess('Equipe marcada como completa.')
+      await fetchTeamDetails()
+    } catch (err: unknown) {
+      console.error('Erro ao marcar equipe como completa:', err)
+      const errorMessage = err instanceof Error ? err.message : 'Erro ao marcar equipe como completa'
+      setError(errorMessage)
+    }
+  }
+
   const handleRemoveVolunteer = async (memberId: string) => {
     if (!window.confirm('Tem certeza que deseja remover este voluntário da equipe?')) {
+      return
+    }
+    if (team?.event?.status === 'completed') {
+      setError('Não é possível remover voluntários: o evento já foi finalizado.')
       return
     }
 
@@ -260,6 +313,10 @@ export const EditTeam: React.FC = () => {
 
   const handleDeleteTeam = async () => {
     if (!window.confirm('Tem certeza que deseja excluir esta equipe? Esta ação não pode ser desfeita e todos os membros serão removidos.')) {
+      return
+    }
+    if (team?.event?.status === 'completed') {
+      setError('Não é possível excluir esta equipe: o evento está finalizado. Registros devem permanecer para histórico.')
       return
     }
 
@@ -323,9 +380,12 @@ export const EditTeam: React.FC = () => {
     }
   }
 
-  const canEdit = user?.role === 'admin' || 
+  // Não permitir edição se o evento associado já estiver finalizado
+  const eventIsCompleted = team?.event?.status === 'completed'
+
+  const canEdit = !eventIsCompleted && (user?.role === 'admin' || 
                   (user?.role === 'captain' && team?.captain_id === user?.id) ||
-                  (user?.role === 'captain' && team?.event?.admin_id === user?.id)
+    (user?.role === 'captain' && team?.event?.admin_id === user?.id))
 
   if (loading) {
     return (
@@ -388,7 +448,8 @@ export const EditTeam: React.FC = () => {
               <Save className="w-4 h-4" />
               <span>Salvar Alterações</span>
             </button>
-            
+
+            {/* Admins can delete teams */}
             {user?.role === 'admin' && (
               <button
                 onClick={handleDeleteTeam}
@@ -396,6 +457,18 @@ export const EditTeam: React.FC = () => {
               >
                 <Trash2 className="w-4 h-4" />
                 <span>Excluir Equipe</span>
+              </button>
+            )}
+
+            {/* If team is forming, offer admins a quick action to mark as complete */}
+            {user?.role === 'admin' && team?.status === 'forming' && (
+              <button
+                onClick={handleMarkComplete}
+                className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                title="Marcar equipe como completa"
+              >
+                <CheckCircle className="w-4 h-4" />
+                <span>Marcar como Completa</span>
               </button>
             )}
           </div>
@@ -487,8 +560,17 @@ export const EditTeam: React.FC = () => {
             ) : (
               <div className="text-center py-8">
                 <AlertCircle className="mx-auto h-12 w-12 text-gray-400 mb-4" />
-                <h3 className="text-lg font-medium text-gray-900 mb-2">Sem permissão para editar</h3>
-                <p className="text-gray-500">Você não tem permissão para editar esta equipe.</p>
+                  {team?.event?.status === 'completed' ? (
+                    <>
+                      <h3 className="text-lg font-medium text-gray-900 mb-2">Evento finalizado — edição bloqueada</h3>
+                      <p className="text-gray-500">Este evento já foi finalizado. As equipes são mantidas para histórico e não podem ser editadas.</p>
+                    </>
+                  ) : (
+                    <>
+                        <h3 className="text-lg font-medium text-gray-900 mb-2">Sem permissão para editar</h3>
+                        <p className="text-gray-500">Você não tem permissão para editar esta equipe.</p>
+                    </>
+                  )}
               </div>
             )}
           </div>

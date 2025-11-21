@@ -71,7 +71,55 @@ const AvaliarCapitao: React.FC = () => {
                 });
 
                 if (error) throw error;
-                setEvaluableCaptains(data || []);
+
+                // If RPC returns nothing (e.g. DB uses 'finished' instead of 'completed'), try a client-side fallback
+                const rpcResult = (data || []) as any[];
+                if (rpcResult.length > 0) {
+                    setEvaluableCaptains(rpcResult);
+                } else {
+                    // Fallback: query teams where user is a volunteer and event status is completed OR finished
+                    const { data: teamsData, error: teamsError } = await supabase
+                        .from('team_members')
+                        .select(`team:teams(id, name, event_id, captain_id, event:events(id, title, event_date, status)), role_in_team`)
+                        .eq('user_id', user.id)
+                        .eq('role_in_team', 'volunteer');
+
+                    if (!teamsError && teamsData) {
+                        const mapped = (teamsData as any[])
+                            .filter(t => t.team && t.team.event && (t.team.event.status === 'completed' || t.team.event.status === 'finished'))
+                            .map(t => ({
+                                event_id: t.team.event.id,
+                                event_title: t.team.event.title,
+                                event_date: t.team.event.event_date,
+                                team_id: t.team.id,
+                                team_name: t.team.name,
+                                captain_id: t.team.captain_id,
+                                captain_name: '',
+                                captain_email: '',
+                                already_evaluated: false
+                            }));
+
+                        // Try to enrich captain name/email where possible
+                        if (mapped.length > 0) {
+                            const captainIds = Array.from(new Set(mapped.map(m => m.captain_id).filter(Boolean)));
+                            if (captainIds.length > 0) {
+                                const { data: usersData } = await supabase.from('users').select('id, full_name, email').in('id', captainIds);
+                                const userMap: Record<string, any> = {};
+                                (usersData || []).forEach((u: any) => { userMap[u.id] = u; });
+                                mapped.forEach(m => {
+                                    if (userMap[m.captain_id]) {
+                                        m.captain_name = userMap[m.captain_id].full_name;
+                                        m.captain_email = userMap[m.captain_id].email;
+                                    }
+                                });
+                            }
+                        }
+
+                        setEvaluableCaptains(mapped);
+                    } else {
+                        setEvaluableCaptains([]);
+                    }
+                }
             } catch (err) {
                 console.error('Erro ao buscar capitães avaliáveis:', err);
                 setError('Erro ao carregar capitães para avaliação.');
