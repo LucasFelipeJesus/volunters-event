@@ -136,6 +136,8 @@ export const CaptainDashboard: React.FC = () => {
     const [availableEvents, setAvailableEvents] = useState<VolunteerEvent[]>([])
     const [myParticipations, setMyParticipations] = useState<MyParticipation[]>([])
     const [myEvaluations, setMyEvaluations] = useState<MyEvaluation[]>([])
+    const [myAdminEvaluations, setMyAdminEvaluations] = useState<any[]>([])
+    const [myCaptainEvaluations, setMyCaptainEvaluations] = useState<any[]>([])
     const [stats, setStats] = useState<VolunteerStats>({
         totalParticipations: 0,
         activeParticipations: 0,
@@ -203,8 +205,32 @@ export const CaptainDashboard: React.FC = () => {
             const finalParticipations = Array.from(uniqueParticipations.values()).sort((a, b) => (b.team.event.event_date || '').localeCompare(a.team.event.event_date || ''));
             setMyParticipations(finalParticipations);
 
-            const { data: evaluationsData } = await supabase.from('evaluations').select(`*, captain:users!evaluations_captain_id_fkey(id, full_name), event:events(id, title, event_date), team:teams(id, name)`).eq('volunteer_id', user.id);
-            setMyEvaluations(evaluationsData || []);
+            // Se o usuário for voluntário, carregar avaliações recebidas como voluntário
+            if (user.role === 'volunteer') {
+                const { data: evaluationsData } = await supabase.from('evaluations').select(`*, captain:users!evaluations_captain_id_fkey(id, full_name), event:events(id, title, event_date), team:teams(id, name)`).eq('volunteer_id', user.id);
+                setMyEvaluations(evaluationsData || []);
+            } else {
+                // limpar para evitar resíduos
+                setMyEvaluations([]);
+            }
+
+            // Buscar avaliações do capitão feitas por voluntários (captain_evaluation_details view)
+            try {
+                const { data: captainEvals } = await supabase.from('captain_evaluation_details').select('*').eq('captain_id', user.id);
+                setMyCaptainEvaluations(captainEvals || []);
+            } catch (e) {
+                console.warn('Não foi possível carregar avaliações de voluntários para o capitão:', e);
+                setMyCaptainEvaluations([]);
+            }
+
+            // Buscar avaliações de capitão feitas por administradores (admin_evaluation_details)
+            try {
+                const { data: adminEvaluationsData } = await supabase.from('admin_evaluation_details').select('*').eq('captain_id', user.id);
+                setMyAdminEvaluations(adminEvaluationsData || []);
+            } catch (e) {
+                console.warn('Não foi possível carregar avaliações administrativas do capitão:', e);
+                setMyAdminEvaluations([]);
+            }
 
             const activeParticipations = finalParticipations.filter(p => p.status === 'active' && p.team.event.event_date && p.team.event.event_date >= todayString).length;
             const completedEvents = finalParticipations.filter(p => p.team.event.event_date && p.team.event.event_date < todayString).length;
@@ -701,7 +727,16 @@ export const CaptainDashboard: React.FC = () => {
                                                     <h3 className="font-semibold text-gray-900">{p.team?.event?.title}</h3>
                                                     <p className="text-sm text-gray-600">{formatDateDisplay(p.team?.event?.event_date)}</p>
                                                 </div>
-                                                {myEvaluations.find(e => e.event.id === p.team.event.id) ? renderStarRating(myEvaluations.find(e => e.event.id === p.team.event.id)!.rating) : <div className="flex items-center space-x-1 text-xs text-gray-400"><AlertTriangle className="w-4 h-4" /><span>Sem avaliação</span></div>}
+                                                    {(() => {
+                                                        // Priorizar avaliações de capitão (admin evaluations) quando disponíveis
+                                                        const adminEval = myAdminEvaluations.find(e => e.event_id === p.team.event.id);
+                                                        if (adminEval) return renderStarRating(adminEval.overall_rating);
+                                                        const captainEval = myCaptainEvaluations.find(e => e.event_id === p.team.event.id);
+                                                        if (captainEval) return renderStarRating(captainEval.overall_rating ?? captainEval.overall_rating);
+                                                        const volEval = myEvaluations.find(e => e.event.id === p.team.event.id);
+                                                        if (volEval) return renderStarRating(volEval.rating);
+                                                        return <div className="flex items-center space-x-1 text-xs text-gray-400"><AlertTriangle className="w-4 h-4" /><span>Sem avaliação</span></div>;
+                                                    })()}
                                             </div>
                                         </div>
                                     ))}
