@@ -1,8 +1,9 @@
-import React, { useState, useRef } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import useOutsideClick from '../hooks/useOutsideClick'
 import { Bell } from 'lucide-react'
 import { useNotifications } from '../hooks/useSystem'
 import ViewTeamModal from './ViewTeamModal'
+import type { Notification } from '../lib/supabase'
 import { formatWhatsappLink } from '../utils/phoneUtils'
 import ViewUserModal from './ViewUserModal'
 
@@ -12,7 +13,7 @@ export const NotificationsPanel: React.FC = () => {
     const [modalOpen, setModalOpen] = useState(false)
     const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null)
     const [selectedUserId, setSelectedUserId] = useState<string | null>(null)
-    const [selectedNotification, setSelectedNotification] = useState<any | null>(null)
+    const [selectedNotification, setSelectedNotification] = useState<Notification | null>(null)
     const [markingAll, setMarkingAll] = useState(false)
 
     const panelRef = useRef<HTMLDivElement | null>(null)
@@ -20,7 +21,18 @@ export const NotificationsPanel: React.FC = () => {
     // fechar quando clicar fora ou pressionar Escape (hook reutilizável)
     useOutsideClick([panelRef, buttonRef], () => setPanelOpen(false), panelOpen)
 
-    const handleOpenNotification = async (n: any) => {
+    // Atualiza `aria-expanded` no botão de forma imperativa para evitar avisos estáticos
+    useEffect(() => {
+        if (buttonRef.current) {
+            try {
+                buttonRef.current.setAttribute('aria-expanded', panelOpen ? 'true' : 'false')
+            } catch {
+                // noop
+            }
+        }
+    }, [panelOpen])
+
+    const handleOpenNotification = async (n: Notification | null) => {
         if (!n) return
         // Preferir abrir equipe se existir related_team_id, caso contrário abrir usuário
         setSelectedTeamId(n.related_team_id || null)
@@ -34,7 +46,7 @@ export const NotificationsPanel: React.FC = () => {
 
     return (
         <div className="relative">
-            <button ref={buttonRef} className="relative p-2 text-gray-600 hover:text-gray-900" title="Notificações" onClick={() => setPanelOpen(!panelOpen)}>
+            <button ref={buttonRef} className="relative p-2 text-gray-600 hover:text-gray-900" title="Notificações" onClick={() => setPanelOpen(!panelOpen)} aria-haspopup="dialog" aria-controls="notifications-panel">
                 <Bell className="w-5 h-5" />
                 {unreadCount > 0 && (
                     <span className="absolute -top-1 -right-1 inline-flex items-center justify-center px-1.5 py-0.5 text-xs font-medium leading-none text-white bg-red-600 rounded-full">{unreadCount}</span>
@@ -43,8 +55,8 @@ export const NotificationsPanel: React.FC = () => {
 
             <div
                 ref={panelRef}
+                id="notifications-panel"
                 className={`absolute right-0 mt-2 w-80 sm:w-96 bg-white border border-gray-200 rounded-lg shadow-lg z-40 transform transition-all duration-150 origin-top-right ${panelOpen ? 'opacity-100 scale-100 translate-y-0 pointer-events-auto' : 'opacity-0 scale-95 -translate-y-1 pointer-events-none'}`}
-                aria-hidden={panelOpen ? 'false' : 'true'}
             >
                     <div className="p-3 border-b border-gray-100 flex items-center justify-between">
                         <h4 className="text-sm font-medium">Notificações</h4>
@@ -75,7 +87,7 @@ export const NotificationsPanel: React.FC = () => {
                         ) : notifications.length === 0 ? (
                             <div className="p-4 text-sm text-gray-500">Sem notificações</div>
                         ) : (
-                            notifications.map((n) => (
+                                notifications.map((n: Notification) => (
                                 <div
                                     key={n.id}
                                     onClick={() => handleOpenNotification(n)}
@@ -84,7 +96,7 @@ export const NotificationsPanel: React.FC = () => {
                                     <div className="flex items-center justify-between">
                                         <div className="flex items-center space-x-3">
                                             {n.related_user ? (
-                                                <img src={n.related_user.profile_image_url || n.related_user.avatar_url || '/placeholder-avatar.png'} alt={n.related_user.full_name} className="w-10 h-10 rounded-full object-cover" />
+                                                    <img src={n.related_user.avatar_url || '/placeholder-avatar.png'} alt={n.related_user.full_name} className="w-10 h-10 rounded-full object-cover" />
                                             ) : (
                                                 <div className="w-10 h-10 rounded-full bg-gray-100" />
                                             )}

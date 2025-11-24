@@ -25,6 +25,7 @@ export interface User {
   full_name: string
   phone?: string
   avatar_url?: string
+  profile_image_url?: string
   role: 'volunteer' | 'captain' | 'admin'
   bio?: string
   skills?: string[]
