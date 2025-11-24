@@ -117,13 +117,15 @@ export const Dashboard: React.FC = () => {
           .gte('event_date', today)
 
         const activeIds = (activeEventIds || []).map(ev => ev.id)
+        const { filterValidUUIDs } = await import('../../lib/utils')
+        const activeIdsFiltered = filterValidUUIDs(activeIds)
         let totalTeams = 0
         let activeTeams = 0
-        if (activeIds.length > 0) {
+        if (activeIdsFiltered.length > 0) {
           const { data: teamsData } = await supabase
             .from('teams')
             .select('id, status, event_id')
-            .in('event_id', activeIds)
+            .in('event_id', activeIdsFiltered)
           totalTeams = teamsData?.length || 0
           activeTeams = teamsData?.filter(team => team.status === 'complete').length || 0
         }
@@ -243,26 +245,58 @@ export const Dashboard: React.FC = () => {
 
       setRecentEvents(eventsWithVolunteerCount)
 
-      // Buscar minhas participações mais recentes (registros de eventos)
-      const { data: myParticipationsData } = await supabase
+      // Buscar minhas participações mais recentes (registros de eventos) e também membros de equipe
+      // Mesclar ambos para evitar inconsistências entre inscrições diretas e participações via equipe
+      const { data: registrations } = await supabase
         .from('event_registrations')
-        .select(`
-          *,
-          event:events(
-            id,
-            title,
-            description,
-            event_date,
-            location,
-            status
-          )
-        `)
+        .select(`*, event:events(id, title, description, event_date, location, status)`)
         .eq('user_id', user?.id)
         .in('status', ['confirmed', 'pending'])
         .order('registered_at', { ascending: false })
-        .limit(5)
+        .limit(10)
 
-      setMyParticipations(myParticipationsData || [])
+      const { data: teamMembers } = await supabase
+        .from('team_members')
+        .select(`*, team:teams(*, event:events(id, title, description, event_date, location, status))`)
+        .eq('user_id', user?.id)
+
+      const mappedRegs = (registrations || []).map((r: any) => ({
+        id: `reg_${r.id}`,
+        event: r.event,
+        status: r.status,
+        terms_accepted: r.terms_accepted || false,
+        registered_at: r.registered_at || r.created_at || null,
+      }))
+
+      const mapTeamStatus = (s: string) => {
+        if (!s) return 'pending'
+        if (s === 'active') return 'confirmed'
+        if (s === 'removed') return 'cancelled'
+        if (s === 'inactive') return 'pending'
+        return 'pending'
+      }
+
+      const mappedTeams = (teamMembers || []).map((tm: any) => ({
+        id: `tm_${tm.id}`,
+        event: tm.team?.event || null,
+        status: mapTeamStatus(tm.status),
+        terms_accepted: false,
+        registered_at: tm.joined_at || tm.created_at || null,
+      }))
+
+      // Deduplicar por event.id, preferindo registros diretos (registrations) sobre team_members
+      const byEvent = new Map<string, any>()
+        ;[...mappedTeams, ...mappedRegs].forEach((p: any) => {
+          const evId = p.event?.id
+          if (!evId) return
+          const existing = byEvent.get(evId)
+          // se já existe, preferir o que for registration (id startsWith 'reg_')
+          if (!existing) byEvent.set(evId, p)
+          else if (existing.id.startsWith('tm_') && p.id.startsWith('reg_')) byEvent.set(evId, p)
+        })
+
+      const merged = Array.from(byEvent.values()).sort((a, b) => (b.registered_at || '').localeCompare(a.registered_at || ''))
+      setMyParticipations(merged)
     } catch (error) {
       console.error('Erro ao carregar dashboard:', error)
     } finally {

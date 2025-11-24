@@ -88,7 +88,23 @@ export default function AuthProvider({ children }: { children: React.ReactNode }
             })
 
             if (profile) {
-                console.log('✅ [FETCH_PROFILE] Perfil encontrado, definindo usuário...')
+                console.log('✅ [FETCH_PROFILE] Perfil encontrado')
+
+                // Bloquear usuários desativados imediatamente
+                if ((profile as any).is_active === false) {
+                    console.warn('⛔ [FETCH_PROFILE] Usuário inativo detectado - forçando logout:', userId)
+                    try {
+                        alert('Sua conta foi desativada. Se achar que é um erro, entre em contato com um administrador.')
+                    } catch (e) {
+                        // Ignore em ambientes sem alert
+                    }
+                    // Fazer logout para invalidar sessão local
+                    await signOut()
+                    setLoading(false)
+                    return
+                }
+
+                console.log('✅ [FETCH_PROFILE] Definindo usuário ativo...')
                 setUser(profile)
 
                 try {

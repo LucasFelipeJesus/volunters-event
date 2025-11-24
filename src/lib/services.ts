@@ -40,8 +40,9 @@ export const userService = {
             logger.debug('[userService] Iniciando busca do perfil para userId:', userId)
 
             // Adicionar timeout menor para detectar problemas RLS mais rapidamente
+            const timeoutMs = 10000
             const timeoutPromise = new Promise((_, reject) => {
-                setTimeout(() => reject(new Error('TIMEOUT_RLS_DETECTED')), 10000) // 10 segundos
+                setTimeout(() => reject(new Error('TIMEOUT_RLS_DETECTED')), timeoutMs)
             })
 
             const queryPromise = supabase
@@ -50,8 +51,32 @@ export const userService = {
                 .eq('id', userId)
                 .single()
 
-            logger.debug('[userService] Executando query com timeout de 5s...')
-            const result = await Promise.race([queryPromise, timeoutPromise])
+            logger.debug('[userService] Executando query com timeout de', timeoutMs, 'ms...')
+            let result: any
+            try {
+                result = await Promise.race([queryPromise, timeoutPromise])
+            } catch (raceErr) {
+                // Timeout ocorreu — tentar um select reduzido como fallback diagnóstico
+                logger.warn('[userService] Timeout na query users.select(*). Tentando select reduzido para diagnóstico...')
+                try {
+                    const { data: minimalData, error: minimalErr } = await supabase
+                        .from('users')
+                        .select('id, is_active, role, email')
+                        .eq('id', userId)
+                        .single()
+
+                    if (minimalErr) {
+                        logger.warn('[userService] Select reduzido também falhou:', minimalErr)
+                        throw raceErr
+                    }
+
+                    logger.info('[userService] Select reduzido retornou dados (parcial):', { id: minimalData?.id, is_active: minimalData?.is_active })
+                    // Retornar o resultado mínimo para evitar bloquear o fluxo — o caller deve lidar com campos ausentes
+                    return minimalData as User
+                } catch (fallbackErr) {
+                    throw raceErr
+                }
+            }
 
             // Type guard para verificar se é uma resposta do Supabase
             if (result && typeof result === 'object' && 'data' in result) {
@@ -83,8 +108,12 @@ export const userService = {
                 return data
             }
 
-            // Se chegou aqui, é um timeout
-            throw new Error('TIMEOUT_RLS_DETECTED')
+            // Se chegou aqui sem 'data' no resultado, tratar como timeout/erro RLS
+            if (!result || typeof result !== 'object' || !('data' in result)) {
+                throw new Error('TIMEOUT_RLS_DETECTED')
+            }
+
+            return null
 
         } catch (error) {
             logger.error('[userService] Erro inesperado ao buscar perfil:', error)
@@ -349,6 +378,73 @@ export const userService = {
         } catch (error) {
             logger.error('Erro inesperado ao demover capitães:', error)
             return 0
+        }
+    },
+
+    // Desativar usuário e cancelar inscrições em eventos
+    async deactivateUser(userId: string): Promise<boolean> {
+        try {
+            // Tentar RPC server-side seguro primeiro (se existir)
+            try {
+                const { data: rpcData, error: rpcErr } = await supabase.rpc('deactivate_user_and_cancel_registrations', { user_id_param: userId }) as any
+                if (!rpcErr && rpcData !== undefined) {
+                    logger.info('Usuário desativado via RPC:', userId)
+                    return true
+                }
+                if (rpcErr) {
+                    logger.warn('RPC deactivate_user_and_cancel_registrations retornou erro, fazendo fallback:', rpcErr)
+                }
+            } catch (rpcCallErr) {
+                logger.warn('RPC deactivate_user_and_cancel_registrations não disponível, executando fallback:', rpcCallErr)
+            }
+
+            // Fallback: cancelar inscrições do usuário (pending/confirmed -> cancelled)
+            const { error: regErr } = await supabase
+                .from('event_registrations')
+                .update({ status: 'cancelled' })
+                .in('status', ['pending', 'confirmed'])
+                .eq('user_id', userId)
+
+            if (regErr) {
+                logger.error('Erro ao cancelar inscrições do usuário (fallback):', regErr)
+                // Não abortar imediatamente: tentar ao menos marcar o usuário como inativo
+            } else {
+                logger.info('Inscrições do usuário atualizadas para cancelled (quando aplicável)')
+            }
+
+            // Fallback adicional: remover usuário de equipes ativas (marcar removed)
+            try {
+                const { error: tmErr } = await supabase
+                    .from('team_members')
+                    .update({ status: 'removed', left_at: new Date().toISOString() })
+                    .eq('user_id', userId)
+                    .eq('status', 'active')
+
+                if (tmErr) {
+                    logger.error('Erro ao remover usuário de equipes (fallback):', tmErr)
+                } else {
+                    logger.info('Usuário removido de equipes ativas (fallback) quando aplicável')
+                }
+            } catch (tmCatch) {
+                logger.warn('Erro inesperado ao tentar remover usuário de equipes (fallback):', tmCatch)
+            }
+
+            // Marcar usuário como inativo
+            const { error: userErr } = await supabase
+                .from('users')
+                .update({ is_active: false })
+                .eq('id', userId)
+
+            if (userErr) {
+                logger.error('Erro ao marcar usuário como inativo (fallback):', userErr)
+                return false
+            }
+
+            logger.info('Usuário desativado com sucesso (fallback):', userId)
+            return true
+        } catch (error) {
+            logger.error('Erro inesperado ao desativar usuário:', error)
+            return false
         }
     }
 }

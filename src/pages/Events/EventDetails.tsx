@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
+import { filterValidUUIDs } from '../../lib/utils'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../hooks/useAuth'
@@ -154,6 +155,39 @@ export const EventDetails: React.FC = () => {
 
             setEvent(eventData)
 
+            // Se a data do evento já passou mas o status não foi atualizado, impedir inscrições na UI
+            try {
+                const today = new Date().toISOString().slice(0, 10) // 'YYYY-MM-DD'
+                if (eventData.event_date && eventData.event_date < today && eventData.status !== 'completed') {
+                    // Se for admin, tentar finalizar no servidor via RPC (idempotente). Caso contrário, apenas ajustar localmente para bloquear inscrições.
+                    if (user?.role === 'admin') {
+                        try {
+                            console.debug('[EventDetails] Evento expirado detectado; executando finalize_expired_events RPC para event', id)
+                            await supabase.rpc('finalize_expired_events', { p_event_id: id })
+                            // Recarregar dados após finalização no servidor
+                            const { data: refreshed, error: refreshedErr } = await supabase
+                                .from('events')
+                                .select(`*, teams(*), event_registrations(*), admin:users(*)`)
+                                .eq('id', id)
+                                .single()
+                            if (!refreshedErr && refreshed) {
+                                setEvent(refreshed)
+                                // atualizar editData se estiver no modo de edição
+                                setEditData((prev) => ({ ...prev, status: refreshed.status }))
+                            }
+                        } catch (rpcErr) {
+                            console.warn('[EventDetails] finalize_expired_events RPC falhou:', rpcErr)
+                        }
+                    } else {
+                        // Ajuste local temporário para bloquear ações do usuário
+                        setEvent((prev) => prev ? ({ ...prev, status: 'completed' } as ExtendedEvent) : prev)
+                        setEditData((prev) => ({ ...prev, status: 'completed' }))
+                    }
+                }
+            } catch (e) {
+                console.warn('[EventDetails] Erro ao processar verificação de data do evento:', e)
+            }
+
             // Inicializar dados de edição
             setEditData({
                 title: eventData.title,
@@ -299,15 +333,17 @@ export const EventDetails: React.FC = () => {
 
             // Se status foi alterado para 'completed', inativar todos os membros das equipes do evento
             if (editData.status === 'completed' && event?.teams?.length) {
-                const teamIds = event.teams.map(t => t.id)
+                const teamIds = filterValidUUIDs(event.teams.map((t: any) => t.id))
                 // Atualiza todos os membros ativos dessas equipes para 'inactive' e registra saída
-                const { error: membersError } = await supabase
-                    .from('team_members')
-                    .update({ status: 'inactive', left_at: new Date().toISOString() })
-                    .in('team_id', teamIds)
-                    .eq('status', 'active')
-                if (membersError) {
-                    console.error('Erro ao desalocar membros das equipes:', membersError)
+                if (teamIds.length > 0) {
+                    const { error: membersError } = await supabase
+                        .from('team_members')
+                        .update({ status: 'inactive', left_at: new Date().toISOString() })
+                        .in('team_id', teamIds)
+                        .eq('status', 'active')
+                    if (membersError) {
+                        console.error('Erro ao desalocar membros das equipes:', membersError)
+                    }
                 }
 
                 // Demover capitães de volta a voluntários
@@ -322,13 +358,15 @@ export const EventDetails: React.FC = () => {
 
                 // Marcar equipes deste evento como finalizadas (status 'finished')
                 try {
-                    const { error: teamsError } = await supabase
-                        .from('teams')
-                        .update({ status: 'finished', updated_at: new Date().toISOString() })
-                        .in('id', teamIds)
+                    if (teamIds.length > 0) {
+                        const { error: teamsError } = await supabase
+                            .from('teams')
+                            .update({ status: 'finished', updated_at: new Date().toISOString() })
+                            .in('id', teamIds)
 
-                    if (teamsError) {
-                        console.error('Erro ao marcar equipes como finalizadas:', teamsError)
+                        if (teamsError) {
+                            console.error('Erro ao marcar equipes como finalizadas:', teamsError)
+                        }
                     }
                 } catch (err) {
                     console.error('Erro inesperado ao finalizar equipes:', err)

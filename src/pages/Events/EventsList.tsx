@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react'
+import { filterValidUUIDs } from '../../lib/utils'
 import { Link } from 'react-router-dom'
 import { supabase, Event, EventRegistration } from '../../lib/supabase'
 import { useAuth } from '../../hooks/useAuth'
@@ -54,10 +55,13 @@ export const EventsList: React.FC = () => {
       if (error) return;
       if (outdatedEvents && outdatedEvents.length > 0) {
         const ids = outdatedEvents.map(e => e.id);
-        await supabase
-          .from('events')
-          .update({ status: 'completed' })
-          .in('id', ids);
+          const idsFiltered = filterValidUUIDs(ids)
+          if (idsFiltered.length > 0) {
+          await supabase
+            .from('events')
+            .update({ status: 'completed' })
+            .in('id', idsFiltered);
+        }
       }
     };
     updatePastEventsStatus().then(fetchEvents);

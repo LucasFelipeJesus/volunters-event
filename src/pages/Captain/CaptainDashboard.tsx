@@ -196,11 +196,22 @@ export const CaptainDashboard: React.FC = () => {
 
             const allParticipations = [...processedRegistrations, ...processedParticipations, ...teamsAsCaptainParticipations];
             const uniqueParticipations = new Map<string, MyParticipation>();
-            const getPriority = (p: MyParticipation) => (p.role_in_team === 'captain' ? 3 : p.team.name !== 'Inscrição Direta' ? 2 : 1);
+            // Priorizar inscrições diretas (registrations) sobre participações via equipe
+            const getPriority = (p: MyParticipation) => {
+                if (p.id && p.id.toString().startsWith('reg_')) return 3; // inscrições diretas têm maior prioridade
+                if (p.role_in_team === 'captain') return 2;
+                return 1;
+            };
             for (const p of allParticipations) {
                 const eventId = p.team?.event?.id;
-                if (eventId && (!uniqueParticipations.has(eventId) || getPriority(p) > getPriority(uniqueParticipations.get(eventId)!))) {
+                if (!eventId) continue;
+                const existing = uniqueParticipations.get(eventId);
+                if (!existing) {
                     uniqueParticipations.set(eventId, p);
+                } else {
+                    const existingPriority = getPriority(existing);
+                    const newPriority = getPriority(p);
+                    if (newPriority > existingPriority) uniqueParticipations.set(eventId, p);
                 }
             }
             const finalParticipations = Array.from(uniqueParticipations.values()).sort((a, b) => (b.team.event.event_date || '').localeCompare(a.team.event.event_date || ''));

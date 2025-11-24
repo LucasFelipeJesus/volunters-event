@@ -6,6 +6,7 @@
 // ...código já existente...
 // ...imports e interfaces...
 import React, { useState, useEffect, useCallback } from 'react'
+import { filterValidUUIDs } from '../../lib/utils'
 import { useAuth } from '../../hooks/useAuth'
 import { supabase } from '../../lib/supabase'
 import { userService, authService } from '../../lib/services'
@@ -191,7 +192,207 @@ export const AdminUsersManagement: React.FC = () => {
                 }
             }) || []
 
-            setUsers(processedUsers)
+            // Fallback: se alguma role tem totalEvaluations === 0, tentar buscar diretamente
+            // as avaliações (views detalhadas) para garantir que capitães/voluntários com avaliações não fiquem com zero.
+            try {
+                const enriched = [...processedUsers]
+
+                // Preparar listas de ids para buscar apenas quando necessário
+                const rawCaptainIds = enriched.filter(u => u.role === 'captain' && (u.totalEvaluations || 0) === 0).map(u => u.id)
+                const rawVolunteerIds = enriched.filter(u => u.role === 'volunteer' && (u.totalEvaluations || 0) === 0).map(u => u.id)
+
+                // Sanitizar IDs — garantir que apenas UUIDs válidos sejam passados para `.in(...)`
+                const captainIds = filterValidUUIDs(rawCaptainIds)
+                const volunteerIds = filterValidUUIDs(rawVolunteerIds)
+
+                // 1) Buscar avaliações recebidas por capitães (geralmente guardadas em `captain_evaluation_details`)
+                if (captainIds.length > 0) {
+                    try {
+                        console.debug('[AdminUsers] buscando captain_evaluation_details para captains:', captainIds)
+                        const { data: captainRows, error: captainErr } = await supabase
+                            .from('captain_evaluation_details')
+                            .select('captain_id, overall_rating')
+                            .in('captain_id', captainIds)
+
+                        if (!captainErr && captainRows) {
+                            // Agrupar por captain_id
+                            const map = new Map<string, { count: number; sum: number }>()
+                            captainRows.forEach((r: any) => {
+                                const id = r.captain_id
+                                const entry = map.get(id) || { count: 0, sum: 0 }
+                                entry.count += 1
+                                entry.sum += Number(r.overall_rating || 0)
+                                map.set(id, entry)
+                            })
+
+                            // Aplicar ao enriched
+                            for (const [id, stats] of map.entries()) {
+                                const idx = enriched.findIndex(x => x.id === id)
+                                if (idx !== -1) {
+                                    const prevCount = enriched[idx].totalEvaluations || 0
+                                    const prevAvg = enriched[idx].averageRating || 0
+                                    const prevSum = prevAvg * prevCount
+                                    const newCount = prevCount + stats.count
+                                    const newSum = prevSum + stats.sum
+                                    enriched[idx].totalEvaluations = newCount
+                                    enriched[idx].averageRating = newCount > 0 ? Math.round((newSum / newCount) * 10) / 10 : 0
+                                }
+                            }
+                        } else if (captainErr) {
+                            console.warn('[AdminUsers] captain_evaluation_details .in(...) retornou erro, tentando fallback por ID:', captainErr)
+                            // Fallback: buscar individualmente para contornar PostgREST 400
+                            const map = new Map<string, { count: number; sum: number }>()
+                            for (const id of captainIds) {
+                                try {
+                                    const { data: row, error: rowErr } = await supabase
+                                        .from('captain_evaluation_details')
+                                        .select('captain_id, overall_rating')
+                                        .eq('captain_id', id)
+                                    if (!rowErr && row && row.length > 0) {
+                                        row.forEach((r: any) => {
+                                            const entry = map.get(r.captain_id) || { count: 0, sum: 0 }
+                                            entry.count += 1
+                                            entry.sum += Number(r.overall_rating || 0)
+                                            map.set(r.captain_id, entry)
+                                        })
+                                    }
+                                } catch (e) {
+                                    console.warn('[AdminUsers] Erro no fallback individual captain_evaluation_details para id', id, e)
+                                }
+                            }
+
+                            for (const [id, stats] of map.entries()) {
+                                const idx = enriched.findIndex(x => x.id === id)
+                                if (idx !== -1) {
+                                    const prevCount = enriched[idx].totalEvaluations || 0
+                                    const prevAvg = enriched[idx].averageRating || 0
+                                    const prevSum = prevAvg * prevCount
+                                    const newCount = prevCount + stats.count
+                                    const newSum = prevSum + stats.sum
+                                    enriched[idx].totalEvaluations = newCount
+                                    enriched[idx].averageRating = newCount > 0 ? Math.round((newSum / newCount) * 10) / 10 : 0
+                                }
+                            }
+                        }
+                    } catch (err) {
+                        console.warn('Erro ao buscar captain_evaluation_details para enriquecimento:', err)
+                    }
+                }
+
+                // 2) Buscar avaliações de administradores (admin_evaluation_details) como complemento
+                if (captainIds.length > 0) {
+                    try {
+                        console.debug('[AdminUsers] buscando admin_evaluation_details para captains (fallback):', captainIds)
+                        const { data: adminRows, error: adminErr } = await supabase
+                            .from('admin_evaluation_details')
+                            .select('captain_id, overall_rating')
+                            .in('captain_id', captainIds)
+
+                        if (!adminErr && adminRows) {
+                            const mapA = new Map<string, { count: number; sum: number }>()
+                            adminRows.forEach((r: any) => {
+                                const id = r.captain_id
+                                const entry = mapA.get(id) || { count: 0, sum: 0 }
+                                entry.count += 1
+                                entry.sum += Number(r.overall_rating || 0)
+                                mapA.set(id, entry)
+                            })
+
+                            for (const [id, stats] of mapA.entries()) {
+                                const idx = enriched.findIndex(x => x.id === id)
+                                if (idx !== -1) {
+                                    const prevCount = enriched[idx].totalEvaluations || 0
+                                    const prevAvg = enriched[idx].averageRating || 0
+                                    const prevSum = prevAvg * prevCount
+                                    const newCount = prevCount + stats.count
+                                    const newSum = prevSum + stats.sum
+                                    enriched[idx].totalEvaluations = newCount
+                                    enriched[idx].averageRating = newCount > 0 ? Math.round((newSum / newCount) * 10) / 10 : 0
+                                }
+                            }
+                        }
+                    } catch (err) {
+                        console.warn('Erro ao buscar admin_evaluation_details para enriquecimento:', err)
+                    }
+                }
+
+                // 3) Voluntários: buscar evaluation_details
+                if (volunteerIds.length > 0) {
+                    try {
+                        console.debug('[AdminUsers] buscando evaluation_details para volunteers:', volunteerIds)
+                        const { data: volRows, error: volErr } = await supabase
+                            .from('evaluation_details')
+                            .select('volunteer_id, overall_rating')
+                            .in('volunteer_id', volunteerIds)
+
+                        if (!volErr && volRows) {
+                            const mapV = new Map<string, { count: number; sum: number }>()
+                            volRows.forEach((r: any) => {
+                                const id = r.volunteer_id
+                                const entry = mapV.get(id) || { count: 0, sum: 0 }
+                                entry.count += 1
+                                entry.sum += Number(r.overall_rating || 0)
+                                mapV.set(id, entry)
+                            })
+
+                            for (const [id, stats] of mapV.entries()) {
+                                const idx = enriched.findIndex(x => x.id === id)
+                                if (idx !== -1) {
+                                    const prevCount = enriched[idx].totalEvaluations || 0
+                                    const prevAvg = enriched[idx].averageRating || 0
+                                    const prevSum = prevAvg * prevCount
+                                    const newCount = prevCount + stats.count
+                                    const newSum = prevSum + stats.sum
+                                    enriched[idx].totalEvaluations = newCount
+                                    enriched[idx].averageRating = newCount > 0 ? Math.round((newSum / newCount) * 10) / 10 : 0
+                                }
+                            }
+                        } else if (volErr) {
+                            console.warn('[AdminUsers] evaluation_details .in(...) retornou erro, tentando fallback por ID:', volErr)
+                            // Fallback: buscar individualmente para contornar PostgREST 400
+                            const mapV = new Map<string, { count: number; sum: number }>()
+                            for (const id of volunteerIds) {
+                                try {
+                                    const { data: row, error: rowErr } = await supabase
+                                        .from('evaluation_details')
+                                        .select('volunteer_id, overall_rating')
+                                        .eq('volunteer_id', id)
+                                    if (!rowErr && row && row.length > 0) {
+                                        row.forEach((r: any) => {
+                                            const entry = mapV.get(r.volunteer_id) || { count: 0, sum: 0 }
+                                            entry.count += 1
+                                            entry.sum += Number(r.overall_rating || 0)
+                                            mapV.set(r.volunteer_id, entry)
+                                        })
+                                    }
+                                } catch (e) {
+                                    console.warn('[AdminUsers] Erro no fallback individual evaluation_details para id', id, e)
+                                }
+                            }
+
+                            for (const [id, stats] of mapV.entries()) {
+                                const idx = enriched.findIndex(x => x.id === id)
+                                if (idx !== -1) {
+                                    const prevCount = enriched[idx].totalEvaluations || 0
+                                    const prevAvg = enriched[idx].averageRating || 0
+                                    const prevSum = prevAvg * prevCount
+                                    const newCount = prevCount + stats.count
+                                    const newSum = prevSum + stats.sum
+                                    enriched[idx].totalEvaluations = newCount
+                                    enriched[idx].averageRating = newCount > 0 ? Math.round((newSum / newCount) * 10) / 10 : 0
+                                }
+                            }
+                        }
+                    } catch (err) {
+                        console.warn('Erro ao buscar evaluation_details para enriquecimento:', err)
+                    }
+                }
+
+                setUsers(enriched)
+            } catch (err) {
+                console.error('Erro ao enriquecer estatísticas de usuários:', err)
+                setUsers(processedUsers)
+            }
         } catch (error) {
             console.error('Erro ao buscar usuários:', error)
         } finally {
@@ -266,15 +467,22 @@ export const AdminUsersManagement: React.FC = () => {
         if (!confirm('Tem certeza que deseja desativar este usuário?')) return
 
         try {
-            const { error } = await supabase
-                .from('users')
-                .update({ is_active: false })
-                .eq('id', userId)
+            const success = await userService.deactivateUser(userId)
+            if (success) {
+                // Atualizar estado local imediatamente para resposta mais rápida na UI
+                setUsers(prev => prev.map(u => u.id === userId ? { ...u, is_active: false } as UserProfile : u))
+                setSelectedUser(prev => prev && prev.id === userId ? ({ ...prev, is_active: false } as UserProfile) : prev)
+                // Também atualizar listas filtradas/paginadas para refletir mudança sem esperar fetchUsers
+                setFilteredUsers(prev => prev.map(u => u.id === userId ? { ...u, is_active: false } as UserProfile : u))
+                setPaginatedUsers(prev => prev.map(u => u.id === userId ? { ...u, is_active: false } as UserProfile : u))
 
-            if (error) throw error
+                alert('Usuário desativado com sucesso! Inscrições canceladas quando aplicável.')
 
-            alert('Usuário desativado com sucesso!')
-            fetchUsers()
+                // Forçar refresh dos dados vindos do servidor para garantir consistência
+                await fetchUsers()
+            } else {
+                alert('Erro ao desativar usuário - verifique os logs')
+            }
         } catch (error) {
             console.error('Erro ao desativar usuário:', error)
             alert('Erro ao desativar usuário')
@@ -351,29 +559,86 @@ export const AdminUsersManagement: React.FC = () => {
             let evaluations: (Evaluation | AdminEvaluation)[] = []
 
             if (user.role === 'captain') {
-                // Buscar avaliações de capitão
-                const { data: adminEvals } = await supabase
-                    .from('admin_evaluations')
-                    .select(`
-                        *,
-                        event:events(title)
-                    `)
-                    .eq('captain_id', user.id)
-                    .order('created_at', { ascending: false })
+                // 1) Tentar carregar da view detalhada usada em outras telas
+                try {
+                    const { data: adminEvals, error: adminErr } = await supabase
+                        .from('admin_evaluation_details')
+                        .select('*')
+                        .eq('captain_id', user.id)
+                        .order('evaluation_date', { ascending: false })
 
-                evaluations = adminEvals || []
+                    if (adminErr) throw adminErr
+                    if (adminEvals && adminEvals.length > 0) {
+                        evaluations = adminEvals
+                    }
+                } catch (err) {
+                    console.warn('admin_evaluation_details não disponível ou erro, tentando captain_evaluation_details...', err)
+                }
+
+                // 2) Fallback para outra view que também pode existir
+                if (evaluations.length === 0) {
+                    try {
+                        const { data: captainEvals, error: capErr } = await supabase
+                            .from('captain_evaluation_details')
+                            .select('*')
+                            .eq('captain_id', user.id)
+                            .order('evaluation_date', { ascending: false })
+
+                        if (capErr) throw capErr
+                        if (captainEvals && captainEvals.length > 0) {
+                            evaluations = captainEvals
+                        }
+                    } catch (err) {
+                        console.warn('captain_evaluation_details também falhou, tentando tabela bruta admin_evaluations...', err)
+                    }
+                }
+
+                // 3) Último recurso: consultar a tabela `admin_evaluations` e juntar evento manualmente
+                if (evaluations.length === 0) {
+                    try {
+                        const { data: adminEvalsRaw, error: rawErr } = await supabase
+                            .from('admin_evaluations')
+                            .select(`*, event:events(title, id), captain:users(id, full_name)`)
+                            .eq('captain_id', user.id)
+                            .order('created_at', { ascending: false })
+
+                        if (rawErr) throw rawErr
+                        if (adminEvalsRaw && adminEvalsRaw.length > 0) evaluations = adminEvalsRaw
+                    } catch (err) {
+                        console.error('Erro ao buscar em admin_evaluations (fallback):', err)
+                    }
+                }
             } else {
-                // Buscar avaliações de voluntário
-                const { data: volEvals } = await supabase
-                    .from('evaluations')
-                    .select(`
-                        *,
-                        event:events(title)
-                    `)
-                    .eq('volunteer_id', user.id)
-                    .order('created_at', { ascending: false })
+                // Voluntário: preferir a view detalhada `evaluation_details` (tem event, datas)
+                try {
+                    const { data: volEvals, error: volErr } = await supabase
+                        .from('evaluation_details')
+                        .select('*')
+                        .eq('volunteer_id', user.id)
+                        .order('evaluation_date', { ascending: false })
 
-                evaluations = volEvals || []
+                    if (volErr) throw volErr
+                    if (volEvals && volEvals.length > 0) {
+                        evaluations = volEvals
+                    }
+                } catch (err) {
+                    console.warn('evaluation_details não disponível, tentando tabela evaluations...', err)
+                }
+
+                if (evaluations.length === 0) {
+                    try {
+                        const { data: volEvalsRaw, error: rawErr } = await supabase
+                            .from('evaluations')
+                            .select(`*, event:events(title, id), volunteer:users(id, full_name)`)
+                            .eq('volunteer_id', user.id)
+                            .order('created_at', { ascending: false })
+
+                        if (rawErr) throw rawErr
+                        if (volEvalsRaw && volEvalsRaw.length > 0) evaluations = volEvalsRaw
+                    } catch (err) {
+                        console.error('Erro ao buscar em evaluations (fallback):', err)
+                    }
+                }
             }
 
             setUserEvaluations(evaluations)

@@ -102,8 +102,10 @@ const AvaliarCapitao: React.FC = () => {
                         // Try to enrich captain name/email where possible
                         if (mapped.length > 0) {
                             const captainIds = Array.from(new Set(mapped.map(m => m.captain_id).filter(Boolean)));
-                            if (captainIds.length > 0) {
-                                const { data: usersData } = await supabase.from('users').select('id, full_name, email').in('id', captainIds);
+                            const { filterValidUUIDs } = await import('../../lib/utils')
+                            const captainIdsFiltered = filterValidUUIDs(captainIds)
+                            if (captainIdsFiltered.length > 0) {
+                                const { data: usersData } = await supabase.from('users').select('id, full_name, email').in('id', captainIdsFiltered);
                                 const userMap: Record<string, any> = {};
                                 (usersData || []).forEach((u: any) => { userMap[u.id] = u; });
                                 mapped.forEach(m => {

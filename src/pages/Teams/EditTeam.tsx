@@ -105,15 +105,17 @@ export const EditTeam: React.FC = () => {
         .select('id')
         .eq('event_id', team.event_id);
       const eventTeamIds = eventTeams?.map((t: { id: string }) => t.id) || [];
+      const { filterValidUUIDs } = await import('../../lib/utils')
+      const eventTeamIdsFiltered = filterValidUUIDs(eventTeamIds)
 
       // Buscar membros ativos de todas as equipes deste evento
       let allocatedIds: string[] = [];
-      if (eventTeamIds.length > 0) {
+      if (eventTeamIdsFiltered.length > 0) {
         const { data: eventMembers } = await supabase
           .from('team_members')
           .select('user_id, team_id, status')
           .in('status', ['active'])
-          .in('team_id', eventTeamIds);
+          .in('team_id', eventTeamIdsFiltered);
         allocatedIds = eventMembers?.map((m: { user_id: string }) => m.user_id) || [];
       }
 
