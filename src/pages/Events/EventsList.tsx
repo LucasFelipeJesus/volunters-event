@@ -17,16 +17,29 @@ import {
 } from 'lucide-react'
 
 // --- FUNÇÃO AUXILIAR PARA CONTAR VOLUNTÁRIOS ---
-const getEventVolunteerCount = (event: Event): { current: number; max: number } => {
-  const activeRegistrations = event.event_registrations?.filter(
-    (reg: EventRegistration) => reg.status === 'confirmed' || reg.status === 'pending'
-  ).length || 0;
+  function getEventVolunteerCount(event: any) {
+    // Para evitar double-counting, coletamos user_ids de inscrições diretas e de membros alocados
+    const userIds = new Set()
 
-  return {
-    current: activeRegistrations,
-    max: event.max_volunteers || 0,
-  };
-};
+    ;(event.event_registrations || []).forEach((reg: any) => {
+      if ((reg.status === 'confirmed' || reg.status === 'pending') && reg.user_id) {
+        userIds.add(reg.user_id)
+      }
+    })
+
+    ;(event.teams || []).forEach((team: any) => {
+      ;(team.members || []).forEach((m: any) => {
+        if ((m.status === 'active' || m.status === 'confirmed') && m.user_id) {
+          userIds.add(m.user_id)
+        }
+      })
+    })
+
+    return {
+      current: userIds.size,
+      max: event.max_volunteers || 0,
+    }
+  }
 
 // --- FUNÇÃO CORRIGIDA PARA FORMATAR A DATA ---
 const formatDateDisplay = (dateString?: string) => {
@@ -75,8 +88,8 @@ export const EventsList: React.FC = () => {
         .select(`
           *,
           admin:users!events_admin_id_fkey(*),
-          teams(current_volunteers, max_volunteers),
-          event_registrations(id, status)
+          teams(max_volunteers, members:team_members(id, status, user_id)),
+          event_registrations(id, status, user_id)
         `)
         .order('event_date', { ascending: true })
 

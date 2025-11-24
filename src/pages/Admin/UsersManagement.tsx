@@ -216,7 +216,7 @@ export const AdminUsersManagement: React.FC = () => {
 
                         if (!captainErr && captainRows) {
                             // Agrupar por captain_id
-                            const map = new Map<string, { count: number; sum: number }>()
+                            const map = new Map()
                             captainRows.forEach((r: any) => {
                                 const id = r.captain_id
                                 const entry = map.get(id) || { count: 0, sum: 0 }
@@ -241,7 +241,7 @@ export const AdminUsersManagement: React.FC = () => {
                         } else if (captainErr) {
                             console.warn('[AdminUsers] captain_evaluation_details .in(...) retornou erro, tentando fallback por ID:', captainErr)
                             // Fallback: buscar individualmente para contornar PostgREST 400
-                            const map = new Map<string, { count: number; sum: number }>()
+                            const map = new Map()
                             for (const id of captainIds) {
                                 try {
                                     const { data: row, error: rowErr } = await supabase
@@ -289,7 +289,7 @@ export const AdminUsersManagement: React.FC = () => {
                             .in('captain_id', captainIds)
 
                         if (!adminErr && adminRows) {
-                            const mapA = new Map<string, { count: number; sum: number }>()
+                            const mapA = new Map()
                             adminRows.forEach((r: any) => {
                                 const id = r.captain_id
                                 const entry = mapA.get(id) || { count: 0, sum: 0 }
@@ -326,7 +326,7 @@ export const AdminUsersManagement: React.FC = () => {
                             .in('volunteer_id', volunteerIds)
 
                         if (!volErr && volRows) {
-                            const mapV = new Map<string, { count: number; sum: number }>()
+                            const mapV = new Map()
                             volRows.forEach((r: any) => {
                                 const id = r.volunteer_id
                                 const entry = mapV.get(id) || { count: 0, sum: 0 }
@@ -350,7 +350,7 @@ export const AdminUsersManagement: React.FC = () => {
                         } else if (volErr) {
                             console.warn('[AdminUsers] evaluation_details .in(...) retornou erro, tentando fallback por ID:', volErr)
                             // Fallback: buscar individualmente para contornar PostgREST 400
-                            const mapV = new Map<string, { count: number; sum: number }>()
+                            const mapV = new Map()
                             for (const id of volunteerIds) {
                                 try {
                                     const { data: row, error: rowErr } = await supabase

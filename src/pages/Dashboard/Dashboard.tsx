@@ -216,32 +216,52 @@ export const Dashboard: React.FC = () => {
       // Buscar eventos recentes
       const { data: recentEventsData } = await supabase
         .from('events')
-        .select('*')
+        .select(`
+          *,
+          teams(max_volunteers, members:team_members(id, status, user_id)),
+          event_registrations(id, status, user_id)
+        `)
         .eq('status', 'published')
         .gte('event_date', today)
         .order('event_date', { ascending: true })
         .limit(3)
 
       // Para cada evento, buscar a contagem real de voluntários registrados
-      const eventsWithVolunteerCount: EventWithVolunteers[] = await Promise.all(
-        (recentEventsData || []).map(async (event) => {
-          // Buscar voluntários registrados diretamente no evento
-          const { data: registrationCounts } = await supabase
-            .from('event_registrations')
-            .select('id')
-            .eq('event_id', event.id)
-            .eq('status', 'confirmed')
+      const eventsWithVolunteerCount: EventWithVolunteers[] = (recentEventsData || []).map((event: any) => {
+        try {
+          // Calcular total de voluntários por evento sem duplicar: usar user_id de inscrições e membros de equipe
+          const userIds = new Set()
 
-          const totalVolunteers = registrationCounts?.length || 0
-          const maxVolunteers = event.max_volunteers || 0
+          const regs = Array.isArray(event?.event_registrations) ? event.event_registrations : []
+          regs.forEach((reg: any) => {
+            if (reg && (reg.status === 'confirmed' || reg.status === 'pending')) userIds.add(reg.user_id)
+          })
+
+          const teamsArr = Array.isArray(event?.teams) ? event.teams : []
+          teamsArr.forEach((team: any) => {
+            const members = Array.isArray(team?.members) ? team.members : []
+            members.forEach((m: any) => {
+              if (m && (m.status === 'active' || m.status === 'confirmed') && m.user_id) userIds.add(m.user_id)
+            })
+          })
+
+          const totalVolunteers = typeof userIds.size === 'number' ? userIds.size : 0
+          const maxVolunteers = event?.max_volunteers || 0
 
           return {
             ...event,
             totalVolunteers,
             maxVolunteers
           }
-        })
-      )
+        } catch (err) {
+          console.error('Erro ao processar evento para contagem de voluntários:', { event, err })
+          return {
+            ...event,
+            totalVolunteers: 0,
+            maxVolunteers: event?.max_volunteers || 0
+          }
+        }
+      })
 
       setRecentEvents(eventsWithVolunteerCount)
 
@@ -285,7 +305,7 @@ export const Dashboard: React.FC = () => {
       }))
 
       // Deduplicar por event.id, preferindo registros diretos (registrations) sobre team_members
-      const byEvent = new Map<string, any>()
+      const byEvent = new Map()
         ;[...mappedTeams, ...mappedRegs].forEach((p: any) => {
           const evId = p.event?.id
           if (!evId) return

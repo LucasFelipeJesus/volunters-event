@@ -178,7 +178,7 @@ export const VolunteerDashboard: React.FC = () => {
             });
 
             const allParticipations = [...processedParticipations, ...processedRegistrations];
-            const uniqueParticipations = new Map<string, MyParticipation>();
+            const uniqueParticipations = new Map();
             // Priorizar inscrições diretas (registrations) sobre participações via equipe
             const getPriority = (p: MyParticipation) => {
                 if (p.id && p.id.toString().startsWith('reg_')) return 3; // inscrições diretas têm maior prioridade
@@ -211,7 +211,7 @@ export const VolunteerDashboard: React.FC = () => {
                 const category = p.team?.event?.category || 'other';
                 acc.set(category, (acc.get(category) || 0) + 1);
                 return acc;
-            }, new Map<string, number>());
+            }, new Map());
             const bestCategory = categoryCount.size > 0 ? [...categoryCount.entries()].reduce((a, b) => a[1] > b[1] ? a : b)[0] : '';
 
             setStats({ totalParticipations: finalParticipations.length, activeParticipations, completedEvents, averageRating: Math.round(avgRating * 10) / 10, totalEvaluations: evaluationsData?.length || 0, bestCategory });

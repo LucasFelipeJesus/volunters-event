@@ -310,8 +310,11 @@ export const TeamsManagement: React.FC = () => {
                 </div>
                 <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
                     <div className="text-2xl font-bold text-purple-600">
-                        {teams.reduce((sum, team) => sum + team.current_volunteers, 0)}
-                    </div>
+                            {teams.reduce((sum, team) => {
+                                const active = (team.members || []).filter((m: any) => m.status === 'active' || m.status === 'confirmed').length || 0
+                                return sum + active
+                            }, 0)}
+                        </div>
                     <div className="text-sm text-gray-600">Total de Membros</div>
                 </div>
             </div>
@@ -365,7 +368,7 @@ export const TeamsManagement: React.FC = () => {
                                             </div>
                                             <div className="flex items-center space-x-1">
                                                 <Users className="w-4 h-4" />
-                                                <span>{team.current_volunteers}/{team.max_volunteers} membros</span>
+                                                <span>{(team.members || []).filter((m: any) => m.status === 'active' || m.status === 'confirmed').length}/{team.max_volunteers} membros</span>
                                             </div>
                                         </div>
 

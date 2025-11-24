@@ -69,7 +69,9 @@ export const ViewTeamModal: React.FC<Props> = ({ teamId, open, onClose }) => {
                                 <h4 className="font-medium text-gray-800">Membros</h4>
                                 <div className="mt-2 space-y-2">
                                     {team?.members && team.members.length > 0 ? (
-                                        team.members.map((m: any) => (
+                                        team.members
+                                            .filter((m: any) => m.status === 'active')
+                                            .map((m: any) => (
                                             <div key={m.id} className="flex items-center space-x-3 bg-gray-50 rounded p-2">
                                                 <img src={m.user?.profile_image_url || m.user?.avatar_url || '/placeholder-avatar.png'} alt={m.user?.full_name} className="w-10 h-10 rounded-full object-cover" />
                                                 <div className="flex-1">
