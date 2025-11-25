@@ -23,6 +23,8 @@
     "react-places-autocomplete": "^7.3.0",
     "react-router-dom": "^7.6.3",
     "yup": "^1.6.1"
+    ,
+    "pdfmake": "^0.2.7"
   },
   "devDependencies": {
     "@eslint/js": "^9.9.1",

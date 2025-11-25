@@ -9,6 +9,7 @@ import {
   LogOut,
   Menu,
   X,
+  Table,
   UserCog
 } from 'lucide-react'
 import { useState } from 'react'
@@ -43,6 +44,7 @@ export const Layout: React.FC = () => {
     ...(user?.role === 'admin' ? [{ name: 'Eventos', href: '/events', icon: Calendar }] : []),
     ...(user?.role === 'admin' ? [{ name: 'Equipes', href: '/teams', icon: Users }] : []),
     ...(user?.role === 'admin' ? [{ name: 'Gerenciar Usuários', href: '/admin/users', icon: UserCog }] : []),
+    ...(user?.role === 'admin' ? [{ name: 'Relatórios', href: '/admin/reports', icon: Table }] : []),
     { name: 'Perfil', href: '/profile', icon: User },
   ]
 

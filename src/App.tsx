@@ -26,6 +26,7 @@ import MinhasAvaliacoesCapitao from './pages/Captain/MinhasAvaliacoes'
 
 // Admin Pages
 import { AdminUsersManagement } from './pages/Admin/UsersManagement'
+import { AdminReports } from './pages/Admin/Reports'
 
 // Diagnostic Components
 import { AuthDiagnostic } from './components/AuthDiagnostic'
@@ -61,6 +62,7 @@ function App() {
             <Route path="teams/create" element={<CreateTeam />} />
             <Route path="teams/:id/edit" element={<EditTeam />} />
             <Route path="admin/users" element={<AdminUsersManagement />} />
+            <Route path="admin/reports" element={<AdminReports />} />
             <Route path="profile" element={<Profile />} />
           </Route>
           
