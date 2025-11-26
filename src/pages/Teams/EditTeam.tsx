@@ -71,6 +71,7 @@ export const EditTeam: React.FC = () => {
     name: '',
     description: '',
     max_volunteers: 0,
+    arrival_time: '',
     status: 'forming'
   });
 
@@ -211,6 +212,7 @@ export const EditTeam: React.FC = () => {
         name: teamData.name,
         description: teamData.description || '',
         max_volunteers: teamData.max_volunteers,
+        arrival_time: teamData.arrival_time || '',
         status: teamData.status
       })
 
@@ -260,6 +262,7 @@ export const EditTeam: React.FC = () => {
           name: editData.name,
           description: editData.description,
           max_volunteers: editData.max_volunteers,
+          arrival_time: editData.arrival_time || null,
           status: editData.status,
           updated_at: new Date().toISOString()
         })
@@ -568,7 +571,16 @@ export const EditTeam: React.FC = () => {
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     />
                   </div>
-
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Hora de Chegada (opcional)</label>
+                    <input
+                      type="time"
+                      title="Hora de chegada da equipe"
+                      value={editData.arrival_time}
+                      onChange={(e) => setEditData({ ...editData, arrival_time: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    />
+                  </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Status</label>
                     <select

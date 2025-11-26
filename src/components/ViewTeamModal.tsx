@@ -63,6 +63,9 @@ export const ViewTeamModal: React.FC<Props> = ({ teamId, open, onClose }) => {
                             <p className="text-sm text-gray-600">Equipe:</p>
                                 <p className="font-medium text-gray-900">{team?.name}</p>
                             {team?.event && <p className="text-xs text-gray-500">Evento: {team.event.title}</p>}
+                                {team?.arrival_time && (
+                                    <p className="text-xs text-gray-500">Hora de chegada: {String(team.arrival_time).slice(0, 5)}</p>
+                                )}
                         </div>
 
                             <div>

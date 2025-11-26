@@ -22,6 +22,7 @@ interface Team {
     current_volunteers: number
     status: string
     created_at: string
+    arrival_time?: string
     event: {
         id: string
         title: string
@@ -370,6 +371,12 @@ export const TeamsManagement: React.FC = () => {
                                                 <Users className="w-4 h-4" />
                                                 <span>{(team.members || []).filter((m: any) => m.status === 'active' || m.status === 'confirmed').length}/{team.max_volunteers} membros</span>
                                             </div>
+                                            {team.arrival_time && (
+                                                <div className="flex items-center space-x-1">
+                                                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                                                    <span>Chegada: {String(team.arrival_time).slice(0, 5)}</span>
+                                                </div>
+                                            )}
                                         </div>
 
                                         {/* Membros da equipe (apenas ativos) */}

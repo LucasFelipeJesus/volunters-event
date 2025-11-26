@@ -66,6 +66,7 @@ export interface Team {
   name: string
   event_id: string
   captain_id?: string
+  arrival_time?: string
   max_volunteers: number
   current_volunteers: number
   status: 'forming' | 'complete' | 'active' | 'finished'
@@ -183,6 +184,7 @@ export interface TeamDetails {
   event_id: string
   event_title: string
   event_date: string
+  arrival_time?: string
   captain_id?: string
   captain_name?: string
   max_volunteers: number

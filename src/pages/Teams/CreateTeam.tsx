@@ -44,7 +44,8 @@ export const CreateTeam: React.FC = () => {
         description: '',
         event_id: '',
         captain_id: '',
-        max_volunteers: 5
+        max_volunteers: 5,
+        arrival_time: ''
     })
 
     const [markComplete, setMarkComplete] = useState(false)
@@ -243,6 +244,7 @@ export const CreateTeam: React.FC = () => {
                 .insert({
                     name: formData.name,
                     event_id: formData.event_id,
+                    arrival_time: formData.arrival_time || null,
                     captain_id: formData.captain_id,
                     max_volunteers: formData.max_volunteers,
                     current_volunteers: 0, // será atualizado após inserir membros
@@ -489,6 +491,19 @@ export const CreateTeam: React.FC = () => {
                                     }`}
                             />
                             {errors.max_volunteers && <p className="text-red-600 text-sm mt-1">{errors.max_volunteers}</p>}
+                        </div>
+                        <div>
+                            <label htmlFor="arrival_time" className="block text-sm font-medium text-gray-700 mb-2">
+                                Hora de Chegada (opcional)
+                            </label>
+                            <input
+                                type="time"
+                                id="arrival_time"
+                                name="arrival_time"
+                                value={formData.arrival_time}
+                                onChange={handleInputChange}
+                                className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 border-gray-300`}
+                            />
                         </div>
                     </div>
 

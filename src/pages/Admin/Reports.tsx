@@ -343,7 +343,7 @@ const AdminReports: React.FC = () => {
             // Team block as a single stack so pdfMake attempts to keep it together where possible
             const teamHeader = {
               columns: [
-                { width: '*', stack: [{ text: `Equipe: ${team.name || team.team_name || '-'}`, style: 'teamName' }, { text: `Voluntários: ${orderedMembers.length}`, style: 'small' }] },
+                { width: '*', stack: [{ text: `Equipe: ${team.name || team.team_name || '-'}`, style: 'teamName' }, { text: `Voluntários: ${orderedMembers.length}`, style: 'small' }, (team.arrival_time ? { text: `Chegada: ${String(team.arrival_time).slice(0, 5)}`, style: 'small' } : null)] },
                 { width: 'auto', text: '' }
               ],
               margin: [0, 6, 0, 6]
@@ -524,7 +524,7 @@ const AdminReports: React.FC = () => {
                         <div>
                           <div className="text-xs text-gray-500">{event?.title}</div>
                           <div className="font-medium">{team.name || team.team_name || 'Equipe sem nome'}</div>
-                          <div className="text-sm text-gray-600">Voluntários: {ordered.length}</div>
+                          <div className="text-sm text-gray-600">Voluntários: {ordered.length} {team.arrival_time ? `· Chegada: ${String(team.arrival_time).slice(0, 5)}` : ''}</div>
                         </div>
                         <div>
                           <label className="inline-flex items-center space-x-2">
