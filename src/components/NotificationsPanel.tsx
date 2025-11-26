@@ -96,9 +96,13 @@ export const NotificationsPanel: React.FC = () => {
                                     <div className="flex items-center justify-between">
                                         <div className="flex items-center space-x-3">
                                             {n.related_user ? (
-                                                    <img src={n.related_user.avatar_url || '/placeholder-avatar.png'} alt={n.related_user.full_name} className="w-10 h-10 rounded-full object-cover" />
-                                            ) : (
-                                                <div className="w-10 h-10 rounded-full bg-gray-100" />
+                                                    (n.related_user.avatar_url) ? (
+                                                        <img src={n.related_user.avatar_url} alt={n.related_user.full_name} className="w-10 h-10 rounded-full object-cover" onError={(e: any) => { e.currentTarget.style.display = 'none'; }} />
+                                                    ) : (
+                                                        <div className="w-10 h-10 rounded-full bg-transparent" />
+                                                    )
+                                                ) : (
+                                                    <div className="w-10 h-10 rounded-full bg-transparent" />
                                             )}
 
                                             <div className="flex-1">

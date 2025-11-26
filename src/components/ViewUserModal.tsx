@@ -64,7 +64,11 @@ const ViewUserModal: React.FC<Props> = ({ userId, notification = null, open, onC
                         )}
 
                         <div className="flex items-center space-x-4">
-                            <img src={user?.profile_image_url || user?.avatar_url || '/placeholder-avatar.png'} alt={user?.full_name} className="w-16 h-16 rounded-full object-cover" />
+                                {(user?.profile_image_url || user?.avatar_url) ? (
+                                    <img src={user?.profile_image_url || user?.avatar_url} alt={user?.full_name} className="w-16 h-16 rounded-full object-cover" onError={(e: any) => { e.currentTarget.style.display = 'none'; }} />
+                                ) : (
+                                    <div className="w-16 h-16 rounded-full bg-transparent" />
+                                )}
                             <div>
                                 <p className="font-medium text-gray-900">{user?.full_name || 'Usuário'}</p>
                                 <p className="text-xs text-gray-500">{user?.role}</p>

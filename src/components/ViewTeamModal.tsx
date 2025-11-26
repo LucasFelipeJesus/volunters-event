@@ -73,7 +73,11 @@ export const ViewTeamModal: React.FC<Props> = ({ teamId, open, onClose }) => {
                                             .filter((m) => m.status === 'active')
                                             .map((m) => (
                                             <div key={m.id} className="flex items-center space-x-3 bg-gray-50 rounded p-2">
-                                                <img src={m.user?.profile_image_url || m.user?.avatar_url || '/placeholder-avatar.png'} alt={m.user?.full_name} className="w-10 h-10 rounded-full object-cover" />
+                                                    {(m.user?.profile_image_url || m.user?.avatar_url) ? (
+                                                        <img src={m.user?.profile_image_url || m.user?.avatar_url} alt={m.user?.full_name} className="w-10 h-10 rounded-full object-cover" onError={(e: any) => { e.currentTarget.style.display = 'none'; }} />
+                                                    ) : (
+                                                        <div className="w-10 h-10 rounded-full bg-transparent" />
+                                                    )}
                                                 <div className="flex-1">
                                                     <div className="flex items-center justify-between">
                                                         <p className="font-medium text-gray-900">{m.user?.full_name}</p>

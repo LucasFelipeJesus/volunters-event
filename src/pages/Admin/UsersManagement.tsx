@@ -802,11 +802,10 @@ export const AdminUsersManagement: React.FC = () => {
                                                                     src={userData.profile_image_url}
                                                                     alt={userData.full_name}
                                                                     className="w-full h-full object-cover"
+                                                                    onError={(e: any) => { e.currentTarget.style.display = 'none'; }}
                                                                 />
                                                             ) : (
-                                                                <div className="w-full h-full flex items-center justify-center">
-                                                                    <User className="w-5 h-5 text-gray-400" />
-                                                                </div>
+                                                                    <div className="w-full h-full flex items-center justify-center bg-transparent" />
                                                             )}
                                                         </div>
                                                         <div className="ml-3">
@@ -1083,11 +1082,10 @@ export const AdminUsersManagement: React.FC = () => {
                                                         src={selectedUser.profile_image_url}
                                                         alt={selectedUser.full_name}
                                                         className="w-full h-full object-cover"
+                                                        onError={(e: any) => { e.currentTarget.style.display = 'none'; }}
                                                     />
                                                 ) : (
-                                                    <div className="w-full h-full flex items-center justify-center">
-                                                        <User className="w-12 h-12 text-gray-400" />
-                                                    </div>
+                                                        <div className="w-full h-full flex items-center justify-center bg-transparent" />
                                                 )}
                                             </div>
                                             <h3 className="text-lg font-semibold text-gray-900">

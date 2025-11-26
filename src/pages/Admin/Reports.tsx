@@ -1,690 +1,585 @@
-import React, { useEffect, useState, useMemo } from 'react'
-import { useAuth } from '../../hooks/useAuth'
-import { eventService, userService, teamService, evaluationService } from '../../lib/services'
-import { supabase } from '../../lib/supabase'
-import type { User, Event as EventType, Team as TeamType, TeamDetails, TeamMember, UserEventHistory, EvaluationDetails, AdminEvaluationDetails } from '../../lib/supabase'
-import { Filter, Download } from 'lucide-react'
-// pdfMake import via dynamic import (works better with Vite)
-let cachedPdfMake: unknown = null
+import React, { useEffect, useMemo, useState } from 'react';
+import { useAuth } from '../../hooks/useAuth';
+import { eventService, userService, teamService } from '../../lib/services';
+import type { User, Event as EventType } from '../../lib/supabase';
+import { Download } from 'lucide-react';
+import { formatWhatsappLink } from '../../utils/phoneUtils';
+import { displayRole, getRoleEmoji } from '../../utils/roleUtils';
+
+let cachedPdfMake: any = null;
 const loadPdfMake = async () => {
-  if (cachedPdfMake) return cachedPdfMake
-  // Tentar alguns caminhos comuns de import (UMD/ESM)
-  const attempts = [
-    ['pdfmake/build/pdfmake', 'pdfmake/build/vfs_fonts'],
-    ['pdfmake/build/pdfmake.min', 'pdfmake/build/vfs_fonts'],
-    ['pdfmake', 'pdfmake/build/vfs_fonts']
-  ]
-  let lastErr: unknown = null
-  for (const [pkg, vfs] of attempts) {
-    try {
-      const pdfMod: unknown = await import(/* @vite-ignore */ pkg)
-      const vfsMod: unknown = await import(/* @vite-ignore */ vfs)
-      const pdf = (pdfMod as { default?: typeof import("pdfmake/build/pdfmake") })?.default || pdfMod
-      // vfs pode existir em diferentes estruturas de exportação
-      const vfsCast: unknown = vfsMod
-      let vfsObject: unknown = undefined
-      if (vfsCast && vfsCast.pdfMake && vfsCast.pdfMake.vfs) {
-        vfsObject = vfsCast.pdfMake.vfs
-      } else if (vfsCast && vfsCast.default && vfsCast.default.pdfMake && vfsCast.default.pdfMake.vfs) {
-        vfsObject = vfsCast.default.pdfMake.vfs
-      } else if (vfsCast && vfsCast.vfs) {
-        vfsObject = vfsCast.vfs
-      } else {
-        vfsObject = vfsMod
-      }
-      (pdf as typeof import("pdfmake/build/pdfmake")).vfs = vfsObject;
-      cachedPdfMake = pdf
-      return cachedPdfMake
-    } catch (err) {
-      lastErr = err
-      // try next
-    }
-  }
-  // Fallback: tentar carregar via CDN (jsdelivr)
-  try {
-    const cdnBase = 'https://cdn.jsdelivr.net/npm/pdfmake@0.2.7/build'
-    const loadScript = (src: string) => new Promise<void>((resolve, reject) => {
-      const existing = document.querySelector(`script[src="${src}"]`)
-      if (existing) {
-        existing.addEventListener('load', () => resolve())
-        existing.addEventListener('error', () => reject(new Error('Erro ao carregar script'))) 
-        return
-      }
-      const el = document.createElement('script')
-      el.type = 'text/javascript'
-      el.src = src
-      el.onload = () => resolve()
-      el.onerror = () => reject(new Error('Erro ao carregar script: ' + src))
-      document.head.appendChild(el)
-    })
+  if (cachedPdfMake) return cachedPdfMake;
+  const pdfMake = await import('pdfmake/build/pdfmake');
+  const pdfFonts = await import('pdfmake/build/vfs_fonts');
+  const vfs = (pdfFonts as any).pdfMake?.vfs || (pdfFonts as any).default?.pdfMake?.vfs || (pdfFonts as any).default?.vfs;
+  if (vfs) pdfMake.vfs = vfs;
+  cachedPdfMake = pdfMake;
+  return pdfMake;
+};
 
-    await loadScript(`${cdnBase}/pdfmake.min.js`)
-    await loadScript(`${cdnBase}/vfs_fonts.js`)
-    const win = window as Window & { pdfMake?: unknown }
-    if (win && win.pdfMake) {
-      cachedPdfMake = win.pdfMake
-      return cachedPdfMake
-    }
-  } catch (cdnErr) {
-    // se o CDN também falhar, jogar o erro original para facilitar debug
-    throw new Error('Falha ao importar pdfMake: ' + (lastErr?.message || lastErr) + '; CDN erro: ' + (cdnErr instanceof Error ? cdnErr.message : cdnErr))
-  }
-  throw new Error('Falha ao importar pdfMake: ' + (lastErr?.message || lastErr))
-}
+const formatPhoneForWa = (phone?: string | null) => {
+  if (!phone) return null;
+  const digits = String(phone).replace(/[^0-9]/g, '');
+  // Assumes numbers already include country code when provided; if not, you might want to prefix.
+  return digits || null;
+};
 
-interface ReportSectionToggle {
-  id: string
-  label: string
-  checked: boolean
-}
 
-const nowDate = () => new Date().toLocaleString('pt-BR')
+const resolveMember = (member: any, users: User[]) => {
+  if (!member) return null;
+  // If the member is a join record with the user nested (team_members.user)
+  if (member.user && typeof member.user === 'object') return member.user as User;
+  // If it's already a user-like object (has full_name or email), return it
+  if (typeof member === 'object' && (member.id && (member.full_name || member.email || member.phone))) return member as User;
+  // Otherwise try to resolve by common id fields
+  const id = member?.user_id || member?.id || member;
+  return users.find(u => u.id === id) || null;
+};
 
-export const AdminReports: React.FC = () => {
-  const { user } = useAuth()
-    const [events, setEvents] = useState<EventType[]>([])
-  const [users, setUsers] = useState<User[]>([])
-  const [teams, setTeams] = useState<TeamDetails[]>([])
-  const [selectedEvent, setSelectedEvent] = useState<string | null>(null)
-  const [searchTerm, setSearchTerm] = useState('')
-  const [dateFrom, setDateFrom] = useState<string | null>(null)
-  const [dateTo, setDateTo] = useState<string | null>(null)
-  const [sectionToggles, setSectionToggles] = useState<ReportSectionToggle[]>([
-    { id: 'users', label: 'Usuários', checked: true },
-    { id: 'teams', label: 'Equipes e membros por evento', checked: true },
-    { id: 'eventStats', label: 'Estatísticas de Eventos', checked: false },
-    { id: 'evaluations', label: 'Avaliações (Resumo)', checked: false }
-  ])
-  const [selectedUserIds, setSelectedUserIds] = useState<string[]>([])
-  const [selectedTeamIds, setSelectedTeamIds] = useState<string[]>([])
-  const [expandedTeamIds, setExpandedTeamIds] = useState<string[]>([])
-  const [loading, setLoading] = useState(false)
-  const [exportingPdf, setExportingPdf] = useState(false)
 
-  // No PDF settings persistence — removed
+const AdminReports: React.FC = () => {
+  const { user } = useAuth();
+  const [events, setEvents] = useState<EventType[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [exportingPdf, setExportingPdf] = useState(false);
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+  const [selectedEventIds, setSelectedEventIds] = useState<string[]>([]);
+  const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
+  const [eventStatusFilter, setEventStatusFilter] = useState<string>('all');
+  const [teamDetailsByEvent, setTeamDetailsByEvent] = useState<Record<string, any[]>>({});
+
+  const getTeamsForEvent = (ev: any) => {
+    if (!ev) return [];
+    const evTeamsRaw: any[] = (ev as any).teams || [];
+    const hasMembersInEvTeams = evTeamsRaw.some(t => Array.isArray(t.members) && t.members.length > 0) || evTeamsRaw.some(t => Array.isArray(t.team_members) && t.team_members.length > 0);
+    if (hasMembersInEvTeams) return evTeamsRaw;
+    return (teamDetailsByEvent[ev.id] ?? evTeamsRaw);
+  };
+
+  // Normaliza objetos de equipe vindos de diferentes queries/views
+  const normalizeTeam = (t: any) => {
+    if (!t) return null;
+    const id = t.id || t.team_id || t.teamId || null;
+    const name = t.name || t.team_name || t.teamName || t.team_name_local || 'Equipe sem nome';
+    const status = t.status || t.team_status || t.teamStatus || null;
+    const members = Array.isArray(t.members) ? t.members : (Array.isArray(t.team_members) ? t.team_members : (Array.isArray(t.members_list) ? t.members_list : (Array.isArray(t.members || []) ? t.members : [])));
+    const captain = t.captain || (t.captain_id ? { id: t.captain_id } : null) || null;
+    return { ...t, id, name, status, members, captain };
+  };
+
+  const sectionToggles = useMemo(() => [
+    { id: 'teams', label: 'Equipes', checked: true },
+    { id: 'eventStats', label: 'Estatísticas', checked: true }
+  ], []);
+
+  const [selectedToggles] = useState<string[]>(() => sectionToggles.filter(s => s.checked).map(s => s.id));
 
   useEffect(() => {
-    const load = async () => {
+    (async () => {
+      setLoading(true);
       try {
-        setLoading(true)
-        const [evs, us] = await Promise.all([eventService.getAllEvents(), userService.getAllUsers()])
-        setEvents(evs)
-        setUsers(us)
+        const evs = await eventService.getAllEvents();
+        const us = await userService.getAllUsers();
+        setEvents(evs || []);
+        setUsers(us || []);
       } catch (err) {
-        console.error('Erro carregando dados para relatórios', err)
+        console.error('Erro carregando dados do relatório', err);
       } finally {
-        setLoading(false)
+        setLoading(false);
       }
-    }
+    })();
+  }, []);
 
-    load()
-  }, [])
-
+  // Quando o usuário seleciona um evento, buscar versão detalhada (com membros) desse evento
   useEffect(() => {
-    const loadTeams = async () => {
-      if (!selectedEvent) {
-        setTeams([])
-        return
-      }
-      setLoading(true)
+    if (!selectedEventId) return;
+    let mounted = true;
+    (async () => {
       try {
-        const t = await teamService.getEventTeams(selectedEvent)
-        // If the returned teams are missing members, fetch details for those teams
-        const teamsMissingMembers = t.filter(tm => !Array.isArray((tm as TeamDetails).members) || (tm as TeamDetails).members.length === 0)
-        if (teamsMissingMembers.length > 0) {
-          const details = await Promise.all(teamsMissingMembers.map(tm => teamService.getTeamDetails((tm as TeamDetails).team_id)))
-          // Merge details into original set
-          const detailsMap = new Map(details.filter(Boolean).map((d: TeamDetails) => [d.team_id, d]))
-          const merged = t.map(tm => detailsMap.get((tm as TeamDetails).team_id) || tm)
-          setTeams(merged)
-        } else {
-          setTeams(t)
+        // Prefer fetching team details for the selected event (contains members/team_members)
+        const teams = await teamService.getEventTeams(selectedEventId);
+        if (mounted && teams) {
+          setTeamDetailsByEvent(prev => ({ ...prev, [selectedEventId]: teams }));
         }
+
+        // Also fetch detailed event (fallback) to keep event-level fields up to date
+        const detailed = await eventService.getEvent(selectedEventId);
+        if (!mounted || !detailed) return;
+        setEvents(prev => {
+          const found = prev.find(e => e.id === selectedEventId);
+          if (!found) return [detailed, ...prev];
+          return prev.map(e => e.id === selectedEventId ? detailed : e);
+        });
       } catch (err) {
-        console.error('Erro carregando teams', err)
-      } finally {
-        setLoading(false)
+        console.warn('Erro ao carregar dados detalhados do evento', err);
       }
-    }
-    loadTeams()
-  }, [selectedEvent])
+    })();
+    return () => { mounted = false; };
+  }, [selectedEventId]);
 
-  const toggleSection = (id: string) => {
-    setSectionToggles(prev => prev.map(s => s.id === id ? { ...s, checked: !s.checked } : s))
-  }
+  // When user checks event checkboxes (multiple selection), fetch missing details
+  useEffect(() => {
+    if (!selectedEventIds || selectedEventIds.length === 0) return;
+    let mounted = true;
+    (async () => {
+      for (const evId of selectedEventIds) {
+        if (!mounted) break;
+        if (teamDetailsByEvent[evId]) continue;
+        try {
+          const teams = await teamService.getEventTeams(evId);
+          const detailed = await eventService.getEvent(evId);
+          if (!mounted) break;
+          if (teams) setTeamDetailsByEvent(prev => ({ ...prev, [evId]: teams }));
+          if (detailed) setEvents(prev => prev.map(e => e.id === evId ? detailed : e));
+        } catch (err) {
+          console.warn('Erro ao carregar dados detalhados do evento (multi):', evId, err);
+        }
+      }
+    })();
+    return () => { mounted = false; };
+  }, [selectedEventIds]);
 
-  const toggleSelectUser = (userId: string) => {
-    setSelectedUserIds(prev => prev.includes(userId) ? prev.filter(x => x !== userId) : [...prev, userId])
-  }
-
-  const toggleSelectTeam = (teamId: string) => {
-    setSelectedTeamIds(prev => prev.includes(teamId) ? prev.filter(x => x !== teamId) : [...prev, teamId])
-  }
-
-  const toggleExpandTeam = (teamId: string) => {
-    setExpandedTeamIds(prev => prev.includes(teamId) ? prev.filter(id => id !== teamId) : [...prev, teamId])
-  }
-
-  const selectedToggles = useMemo(() => sectionToggles.filter(s => s.checked).map(s => s.id), [sectionToggles])
+  // Prefetch team details for loaded events so counts and members show immediately
+  useEffect(() => {
+    if (!events || events.length === 0) return;
+    let mounted = true;
+    (async () => {
+      for (const ev of events) {
+        if (!mounted) break;
+        if (teamDetailsByEvent[ev.id]) continue;
+        try {
+          const teams = await teamService.getEventTeams(ev.id);
+          if (mounted && teams) {
+            setTeamDetailsByEvent(prev => ({ ...prev, [ev.id]: teams }));
+          }
+        } catch (err) {
+          console.warn('Erro ao pré-carregar equipes do evento', ev.id, err);
+        }
+      }
+    })();
+    return () => { mounted = false; };
+  }, [events, teamDetailsByEvent]);
 
   const exportPDF = async () => {
-    // Gera o documento pdf utilizando pdfMake
-    const docDefinition: Record<string, unknown> = {
+    const docDefinition: any = {
       pageSize: 'A4',
-      pageMargins: [40, 80, 40, 60],
-      header: () => {
-        return {
-          columns: [
-            { text: 'Relatório - Volunters', style: 'headerLeft' },
-            { text: nowDate(), alignment: 'right', style: 'headerRight' }
-          ],
-          margin: [40, 10, 40, 0]
-        }
-      },
-      footer: (currentPage: number, pageCount: number) => ({
-        text: `Página ${currentPage} de ${pageCount}`,
-        alignment: 'center',
-        margin: [0, 0, 0, 10]
-      }),
-      content: [] as Array<Record<string, unknown>>,
-      styles: {
-        sectionTitle: { fontSize: 14, bold: true, margin: [0, 10, 0, 6] },
-        subTitle: { fontSize: 11, italics: true, margin: [0, 0, 0, 8], color: '#666' },
-        tableHeader: { bold: true, fillColor: '#f3f4f6' }
+      pageMargins: [40, 40, 40, 40],
+      content: [],
+      styles: { title: { fontSize: 18, bold: true } }
+    };
+    const targetEvents = (selectedEventIds && selectedEventIds.length > 0)
+      ? events.filter(e => selectedEventIds.includes(e.id))
+      : (selectedEventId ? events.filter(e => e.id === selectedEventId) : events);
+
+    // helper to fetch image and convert to dataURL (cached)
+    const imageCache = new Map<string, string | null>();
+    const failedImageLogs: Array<{ url: string; reason: string; error?: any }> = [];
+    const fetchImageAsDataUrl = async (url?: string | null) => {
+      if (!url) return null;
+      // If it's already a data URL, use it directly
+      if (typeof url === 'string' && url.startsWith('data:')) {
+        imageCache.set(url, url);
+        return url;
       }
-    }
-
-    // Helper to convert image url to dataURL
-    // Image conversion helper removed (PDF trims). If a logo is needed, add a proper raster URL or a dataURL at build time.
-
-    // Meta dos filtros
-    const metaFilters: Array<Record<string, string>> = []
-    if (selectedEvent) {
-      const ev = events.find(e => e.id === selectedEvent)
-      metaFilters.push({ text: `Evento: ${ev?.title || ev?.id}`, style: 'subTitle' })
-    }
-    if (dateFrom || dateTo) {
-      metaFilters.push({ text: `Período: ${dateFrom || '-'} a ${dateTo || '-'}`, style: 'subTitle' })
-    }
-    if (searchTerm) {
-      metaFilters.push({ text: `Pesquisa: ${searchTerm}`, style: 'subTitle' })
-    }
-
-    if (metaFilters.length > 0) docDefinition.content.push({ stack: metaFilters })
-
-      // Usuários
-    if (selectedToggles.includes('users')) {
-      docDefinition.content.push({ text: 'Usuários', style: 'sectionTitle' })
-      // Tabela de usuários
-      const userTableBody: Array<Array<string | number>> = [
-        [
-          { text: 'Nome', style: 'tableHeader' },
-          { text: 'Email', style: 'tableHeader' },
-          { text: 'Cargo', style: 'tableHeader' },
-          { text: 'Ativo', style: 'tableHeader' },
-          { text: 'Cadastrado', style: 'tableHeader' }
-        ]
-      ]
-
-      const filteredUsers = users
-        .filter(u => !searchTerm || u.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) || u.email?.toLowerCase().includes(searchTerm.toLowerCase()))
-        .filter(u => selectedUserIds.length === 0 ? true : selectedUserIds.includes(u.id))
-
-      filteredUsers.forEach(u => {
-        userTableBody.push([
-          u.full_name || '-',
-          u.email || '-',
-          (u.role || '-') as string,
-          u.is_active ? 'Sim' : 'Não',
-          new Date(u.created_at).toLocaleDateString('pt-BR')
-        ])
-      })
-
-      docDefinition.content.push({ table: { headerRows: 1, widths: ['*', '*', 80, 50, 90], body: userTableBody } })
-      docDefinition.content.push({ text: '\n' })
-    }
-
-    // Detalhes individuais por usuário (quando selecionados)
-    if (selectedToggles.includes('users') && selectedUserIds.length > 0) {
-      docDefinition.content.push({ text: 'Detalhes de Usuários Selecionados', style: 'sectionTitle' })
-      for (const userId of selectedUserIds) {
-        const userObj = users.find(u => u.id === userId)
-        if (!userObj) continue
-        docDefinition.content.push({ text: userObj.full_name || userObj.email || userId, style: 'subTitle' })
-        // Perfil principal
-        docDefinition.content.push({ text: [
-          { text: 'Email: ', bold: true }, { text: userObj.email || '-' },
-          { text: '\nTelefone: ', bold: true }, { text: userObj.phone || '-' },
-          { text: '\nCidade: ', bold: true }, { text: userObj.city || '-' }
-        ], margin: [0, 0, 0, 6] })
-
-        // Histórico de eventos
-        try {
-          const history: UserEventHistory[] = await userService.getEventHistory(userId)
-          if (history && history.length > 0) {
-            const histTable: Array<Array<string>> = [[ 'Evento', 'Data', 'Equipe', 'Papel' ]]
-            history.forEach(h => histTable.push([h.event_title || '-', h.event_date || '-', h.team_name || '-', h.role_in_team || '-']))
-            docDefinition.content.push({ text: 'Histórico de Eventos', bold: true, margin: [0, 4, 0, 4] })
-            docDefinition.content.push({ table: { headerRows: 1, widths: ['*', 80, '*', 80], body: histTable } })
-          }
-        } catch (err) {
-          console.warn('Erro ao carregar histórico de eventos para pdf', err)
-        }
-
-        // Avaliações (se existirem)
-        try {
-          let evals: Array<EvaluationDetails | AdminEvaluationDetails> = []
-          if (userObj.role === 'captain') evals = await evaluationService.getCaptainEvaluations(userId)
-          else evals = await evaluationService.getVolunteerEvaluations(userId)
-          if (evals && evals.length > 0) {
-            const evalTable: Array<Array<string | number>> = [[ 'Data', 'Evento', 'Nota', 'Comentários' ]]
-            evals.forEach(ev => evalTable.push([ev.evaluation_date?.slice(0, 10) || ev.created_at?.slice(0, 10) || '-', ev.event_title || ev.event?.title || '-', String(ev.overall_rating || ev.rating || 0), ev.comments || '-']))
-            docDefinition.content.push({ text: 'Avaliações', bold: true, margin: [0, 4, 0, 4] })
-            docDefinition.content.push({ table: { headerRows: 1, widths: [80, '*', 40, '*'], body: evalTable } })
-          }
-        } catch (err) {
-          console.warn('Erro ao carregar avaliações para pdf', err)
-        }
-
-        docDefinition.content.push({ text: '\n' })
-      }
-    }
-
-    // Equipes e membros por evento
-    if (selectedToggles.includes('teams')) {
-      docDefinition.content.push({ text: 'Equipes por Evento', style: 'sectionTitle' })
-      // Se não escolheu evento específico, expandir todos os eventos
-      const targetEvents = selectedEvent ? events.filter(e => e.id === selectedEvent) : events
-      for (const ev of targetEvents) {
-        if (!selectedEvent) docDefinition.content.push({ text: `${ev.title} (${ev.event_date?.slice(0, 10)})`, style: 'subTitle' })
-        // Carregar teams para esse evento, se não estão em memória, buscar via API
-        const evTeams: Array<TeamType | TeamDetails> = ev?.teams || (ev.id ? teams.filter(t => t.event_id === ev.id) : [])
-        const effectiveTeams: Array<TeamType | TeamDetails> = selectedTeamIds.length
-          ? evTeams.filter((tm: TeamType | TeamDetails) => {
-              const idValue = 'team_id' in tm ? (tm as TeamDetails).team_id : (tm as TeamType).id
-              return idValue ? selectedTeamIds.includes(idValue) : false
-            })
-          : evTeams
-
-        if (!evTeams || evTeams.length === 0) {
-          docDefinition.content.push({ text: 'Nenhuma equipe encontrada', margin: [0, 0, 0, 6] })
-          continue
-        }
-
-        // tabela com equipes e conteudo de membros (compacto)
-        const teamTableBody: Array<Array<string | number>> = [
-          [{ text: 'Equipe', style: 'tableHeader' }, { text: 'Capitão', style: 'tableHeader' }, { text: 'Voluntários', style: 'tableHeader' }]
-        ]
-
-        // Enrich member phones in batch for this event's teams
-        try {
-          const allMemberIds: string[] = []
-          effectiveTeams.forEach(t => {
-            if (Array.isArray((t as TeamDetails).members)) {
-              (t as TeamDetails).members.forEach(m => { if (m?.user_id) allMemberIds.push(m.user_id) })
-            }
-            if ((t as TeamDetails).captain_id) allMemberIds.push((t as TeamDetails).captain_id)
-          })
-          const uniqueIds = Array.from(new Set(allMemberIds))
-          if (uniqueIds.length > 0) {
-            const { data: usersData } = await supabase.from('users').select('id, phone').in('id', uniqueIds) as { data: Array<{ id: string; phone?: string }> }
-            const usersMap = new Map((usersData || []).map((u: { id: string; phone?: string }) => [u.id, u]))
-            effectiveTeams.forEach(t => {
-              if (Array.isArray((t as TeamDetails).members)) {
-                (t as TeamDetails).members.forEach(m => {
-                  const u = usersMap.get(m.user_id)
-                  if (u) {
-                    (m as TeamMember & { phone?: string }).phone = u.phone
-                  }
-                })
-              }
-              // attach captain phone if present
-              if ((t as TeamDetails).captain_id) {
-                const cap = usersMap.get((t as TeamDetails).captain_id)
-                if (cap) (t as TeamDetails & { captain_phone?: string }).captain_phone = cap.phone
-              }
-            })
-          }
-        } catch (err) { console.warn('Erro ao enriquecer telefones de membros', err) }
-
-        for (const tm of effectiveTeams) {
-          // Ensure members are present; if not, attempt to fetch team details
-          try {
-            const id = 'team_id' in tm ? (tm as TeamDetails).team_id : (tm as TeamType).id
-            if (id && (!Array.isArray((tm as TeamDetails).members) || (tm as TeamDetails).members.length === 0)) {
-              const details = await teamService.getTeamDetails(id)
-              if (details && Array.isArray(details.members) && details.members.length > 0) {
-                ;(tm as TeamDetails).members = details.members
-                ;(tm as TeamDetails).captain_name = details.captain_name || (tm as TeamDetails).captain_name || (tm as TeamDetails).captain?.full_name
-              }
-            }
-          } catch (err) {
-            console.warn('Erro ao carregar detalhes da equipe', err)
-          }
-          const memberCount = Array.isArray(tm.members) ? tm.members.length : (tm.current_volunteers || 0)
-          // Capitão nome
-          const rawCaptainName = tm.captain?.full_name || tm.captain_name || (tm.captain_id ? 'Id: ' + tm.captain_id : '-')
-          const captainPhone = (tm as TeamDetails).captain_phone || tm.captain?.phone || ''
-          const captainName = captainPhone ? `${rawCaptainName} • ${captainPhone}` : rawCaptainName
-
-          teamTableBody.push([
-            tm.team_name || tm.name || '-',
-            captainName,
-            String(memberCount)
-          ])
-
-          // Se membros existem, adicionar sub-items como tabela detalhada
-          if (Array.isArray((tm as TeamDetails).members) && (tm as TeamDetails).members.length > 0) {
-            docDefinition.content.push({ text: `Membros - ${tm.team_name || tm.name}`, style: 'subTitle' })
-            const memberTableBody: Array<Array<string>> = [[ 'Nome', 'Telefone', 'Papel', 'Status' ]]
-            ;(tm as TeamDetails).members.forEach((m: TeamMember) => {
-              memberTableBody.push([
-                m.full_name || m.user?.full_name || '-',
-                (m as TeamMember & { phone?: string }).phone || m.user?.phone || '-',
-                m.role_in_team || '-',
-                m.status || '-'
-              ])
-            })
-            docDefinition.content.push({ table: { headerRows: 1, widths: ['*', 100, 90, 70], body: memberTableBody }, layout: 'lightHorizontalLines' })
-          }
-        }
-
-        docDefinition.content.push({ table: { headerRows: 1, widths: ['*', 120, 80], body: teamTableBody }, layout: 'lightHorizontalLines' })
-        docDefinition.content.push({ text: '\n' })
-
-      }
-    }
-
-    // Event stats
-    if (selectedToggles.includes('eventStats')) {
-      docDefinition.content.push({ text: 'Estatísticas do Evento', style: 'sectionTitle' })
-      const targetEvents = selectedEvent ? events.filter(e => e.id === selectedEvent) : events
-      for (const ev of targetEvents) {
-        const eventTeams: TeamType[] = ev.teams || []
-        const totalTeams = eventTeams.length
-        const totalVolunteers = eventTeams.reduce((acc: number, t: TeamType) => acc + (t.current_volunteers || 0), 0)
-        const pctFull = ev.max_volunteers ? Math.round((totalVolunteers / (ev.max_volunteers || 1)) * 100) : 0
-
-        const table = {
-          table: {
-            widths: ['*', '*', '*'],
-            body: [
-              ['Equipes', 'Voluntários', 'Capacidade (%)'],
-              [String(totalTeams), String(totalVolunteers), `${pctFull}%`]
-            ]
-          }
-        }
-
-        if (!selectedEvent) docDefinition.content.push({ text: ev.title, style: 'subTitle' })
-        docDefinition.content.push(table)
-        docDefinition.content.push({ text: '\n' })
-      }
-    }
-
-    // Summaries of evaluations - show counts and averages, using views if available
-    if (selectedToggles.includes('evaluations')) {
-      docDefinition.content.push({ text: 'Avaliações - Resumo', style: 'sectionTitle' })
-      // Fetch quick stats via RPCs if exists; fallback to local counts
+      if (imageCache.has(url)) return imageCache.get(url) || null;
       try {
-        // Example: buscar média geral de avaliações via RPC 'get_system_evaluation_summary' - pode não existir
-        const { data: stats, error } = await supabase.rpc('get_system_evaluation_summary') as unknown as { data?: { average_rating?: number; total_evaluations?: number }; error?: unknown }
-        if (!error && stats) {
-          docDefinition.content.push({ text: `Média geral: ${stats.average_rating?.toFixed(1) || '-'} / 5`, margin: [0, 2, 0, 6] })
-          docDefinition.content.push({ text: `Total avaliações: ${stats.total_evaluations || 0}`, margin: [0, 2, 0, 6] })
-        } else {
-          // Fallback: agregação básica
-          const { data: evs } = await supabase.from('evaluations').select<{ rating: number }>('rating')
-          const avg = evs && evs.length > 0 ? (evs.reduce((s: number, r: { rating: number }) => s + Number(r.rating || 0), 0) / evs.length) : 0
-          docDefinition.content.push({ text: `Média geral: ${avg ? avg.toFixed(1) : '-'} / 5`, margin: [0, 2, 0, 6] })
-        }
+        const res = await fetch(url);
+        if (!res.ok) throw new Error('fetch failed');
+        const blob = await res.blob();
+        const reader = new FileReader();
+        const dataUrl: string = await new Promise((resolve, reject) => {
+          reader.onerror = () => reject(new Error('fileReader error'));
+          reader.onload = () => resolve(String(reader.result || ''));
+          reader.readAsDataURL(blob);
+        });
+        // If the image is SVG, convert to PNG because pdfMake may not support SVG data URIs
+        const isSvg = typeof dataUrl === 'string' && dataUrl.startsWith('data:image/svg');
+        const finalDataUrl = isSvg ? await (async () => {
+          try {
+            return await new Promise<string>((resolveConvert, rejectConvert) => {
+              const img = new Image();
+              img.onload = () => {
+                try {
+                  const canvas = document.createElement('canvas');
+                  canvas.width = img.width || 100;
+                  canvas.height = img.height || 100;
+                  const ctx = canvas.getContext('2d');
+                  if (!ctx) return rejectConvert(new Error('Canvas not supported'));
+                  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                  const png = canvas.toDataURL('image/png');
+                  resolveConvert(png);
+                } catch (e) {
+                  rejectConvert(e);
+                }
+              };
+              img.onerror = () => rejectConvert(new Error('Image load error'));
+              img.src = dataUrl;
+            });
+          } catch (e) {
+            console.warn('Falha ao converter SVG para PNG:', e);
+            failedImageLogs.push({ url: String(url), reason: 'svg-conversion-failed', error: e });
+            return dataUrl; // fallback to original
+          }
+        })() : dataUrl;
+        // store final (possibly converted) data URL
+        imageCache.set(url, finalDataUrl);
+        return finalDataUrl;
       } catch (err) {
-        console.warn('get_system_evaluation_summary não existe ou falhou', err)
+        console.warn('Não foi possível carregar imagem para PDF:', url, err);
+        failedImageLogs.push({ url: String(url), reason: 'fetch-or-read-failed', error: err });
+        imageCache.set(url, null);
+        return null;
+      }
+    };
+
+    // prefetch unique avatars used in the targeted events, applying current filters
+    const avatarUrls = new Set<string>();
+    // also prefetch a local placeholder image (if available) so we can embed it when a member has no avatar
+    const placeholderKey = '/placeholder-avatar.png';
+    const getTeamsForEvent = (ev: any) => {
+      const evTeamsRaw: any[] = (ev as any).teams || [];
+      const hasMembersInEvTeams = evTeamsRaw.some(t => Array.isArray(t.members) && t.members.length > 0) || evTeamsRaw.some(t => Array.isArray(t.team_members) && t.team_members.length > 0);
+      if (hasMembersInEvTeams) return evTeamsRaw;
+      return (teamDetailsByEvent[ev.id] ?? evTeamsRaw);
+    };
+
+    for (const ev of targetEvents) {
+      const evTeams: any[] = getTeamsForEvent(ev);
+      for (const team of evTeams) {
+        if (selectedTeamId && team.id !== selectedTeamId) continue;
+        const members = Array.isArray((team as any).members) ? (team as any).members : (Array.isArray((team as any).team_members) ? (team as any).team_members : (Array.isArray((team as any).members_list) ? (team as any).members_list : []));
+        for (const m of members) {
+          const member = resolveMember(m, users);
+          const avatar = (member as any)?.profile_image_url || (member as any)?.avatar_url || (member as any)?.image || (member as any)?.photo_url || null;
+          if (avatar) avatarUrls.add(avatar);
+        }
       }
     }
-
-    // Finalizar e mostrar arquivo
+    // ensure placeholder is available in the cache
     try {
-      setExportingPdf(true)
-      // Server-side generation removed; always use client-side pdfMake
-      const pdf = await loadPdfMake()
-        // No PDF cover adjustments; using default document content
-      // If there are metaFilters, add them to cover
-      // metaFilters already added as content above; no cover stacking required
-      pdf.createPdf(docDefinition).download(`relatorio_volunters_${Date.now()}.pdf`)
-    } catch (err) {
-      console.error('Erro gerando PDF com pdfMake', err)
-      alert('Erro gerando PDF: ' + (err instanceof Error ? err.message : err))
-    } finally {
-      setExportingPdf(false)
+      await fetchImageAsDataUrl(placeholderKey);
+      avatarUrls.add(placeholderKey);
+    } catch (e) {
+    // ignore if placeholder not found
     }
-  }
+    await Promise.all(Array.from(avatarUrls).map(u => fetchImageAsDataUrl(u)));
+    const placeholderDataUri = imageCache.get(placeholderKey) || null;
 
-  // CSV export removed
+    // Build images dictionary for pdfMake and a map from original url -> image key
+    const imagesDict: Record<string, string> = {};
+    const urlToImageKey = new Map<string, string>();
+    let imgIdx = 0;
+    for (const url of avatarUrls) {
+      const cached = imageCache.get(url);
+      // only register images that are explicit image data URIs (avoid data:text/html etc)
+      if (typeof cached === 'string' && cached.startsWith('data:image/')) {
+        const key = `img_${imgIdx++}`;
+        imagesDict[key] = cached;
+        urlToImageKey.set(url, key);
+      } else {
+        // log for debugging if conversion failed or returned non-image data
+        if (cached === null) {
+          failedImageLogs.push({ url: String(url), reason: 'conversion-failed-or-null' });
+        } else {
+          failedImageLogs.push({ url: String(url), reason: 'not-image-data-uri', error: cached });
+        }
+        if (cached !== null) console.warn('Imagem não é data:image e será ignorada pelo PDF:', url, cached);
+      }
+    }
+    // ensure placeholder is available under a key if present
+    let placeholderKeyName: string | null = null;
+    if (placeholderDataUri && typeof placeholderDataUri === 'string' && placeholderDataUri.startsWith('data:')) {
+      const key = `img_${imgIdx++}`;
+      imagesDict[key] = placeholderDataUri;
+      urlToImageKey.set(placeholderKey, key);
+      placeholderKeyName = key;
+    }
 
-  if (!user || user.role !== 'admin') {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-center">
-          <h2 className="text-xl font-semibold text-gray-900">Acesso Negado</h2>
-          <p className="text-gray-600">Apenas administradores podem acessar relatórios.</p>
-        </div>
-      </div>
-    )
-  }
+    // attach images dictionary to docDefinition so pdfMake recognizes keys
+    if (Object.keys(imagesDict).length > 0) docDefinition.images = imagesDict;
+
+    if (failedImageLogs.length > 0) {
+      console.groupCollapsed('Relatório - imagens ignoradas/convert-failed');
+      console.table(failedImageLogs);
+      console.groupEnd();
+    }
+
+    if (selectedToggles.includes('teams')) {
+      docDefinition.content.push({ text: 'Equipes por Evento', style: 'title' });
+      for (const ev of targetEvents) {
+        docDefinition.content.push({ text: ev.title || '-', margin: [0, 8, 0, 6], style: 'subheader' });
+        const evTeams: any[] = getTeamsForEvent(ev);
+          for (const team of evTeams) {
+            if (selectedTeamId && team.id !== selectedTeamId) continue;
+
+            const members = Array.isArray((team as any).members) ? (team as any).members : (Array.isArray((team as any).team_members) ? (team as any).team_members : (Array.isArray((team as any).members_list) ? (team as any).members_list : []));
+            const resolvedMembers: Array<{ raw: any; user: User | null }> = members.map((m: any) => ({ raw: m, user: resolveMember(m, users) }));
+            const captainIdLocal = team && team.captain && typeof team.captain === 'object' ? team.captain.id : (team.captain_id || team.captain);
+            const captainEntryLocal = resolvedMembers.find((e: { raw: any; user: User | null }) => (e.user && (e.user as any).id && (e.user as any).id === captainIdLocal) || (e.raw && (e.raw.id === captainIdLocal || e.raw.user_id === captainIdLocal || e.raw === captainIdLocal)));
+            const orderedMembers = captainEntryLocal ? [captainEntryLocal, ...resolvedMembers.filter((e: { raw: any; user: User | null }) => e !== captainEntryLocal)] : resolvedMembers;
+
+            // Build member rows
+            const memberRows: any[] = [];
+            for (const entry of orderedMembers) {
+              const m = entry.raw;
+              const member = entry.user || (m && m.user) || null;
+              const phone = (member as any)?.phone || (member as any)?.phone_number || '';
+              const avatar = (member as any)?.profile_image_url || (member as any)?.avatar_url || (member as any)?.image || (member as any)?.photo_url || null;
+              const imageKey = avatar && urlToImageKey.has(avatar) ? urlToImageKey.get(avatar) : (placeholderKeyName || null);
+              const isCaptain = !!member && ((member as any).id === captainIdLocal);
+
+              const photoCell = imageKey
+                ? { image: imageKey, width: 40, height: 40, margin: [0, 2, 8, 2] }
+                : { text: '', margin: [0, 8, 8, 8] };
+              const nameText = (member as any)?.full_name || (m && (m.name || m.user?.full_name)) || '-';
+              const nameCell = { text: nameText + (isCaptain ? '  (Capitão)' : ''), style: isCaptain ? 'memberCaptain' : 'memberName' };
+              const waNumber = formatPhoneForWa(phone as any);
+              const phoneCell = waNumber ? { text: phone || '-', link: `https://wa.me/${waNumber}`, color: '#1D9B58' } : (phone || '-');
+
+              memberRows.push([{ stack: [photoCell] }, nameCell, phoneCell]);
+            }
+
+            // Team block as a single stack so pdfMake attempts to keep it together where possible
+            const teamHeader = {
+              columns: [
+                { width: '*', stack: [{ text: `Equipe: ${team.name || team.team_name || '-'}`, style: 'teamName' }, { text: `Voluntários: ${orderedMembers.length}`, style: 'small' }] },
+                { width: 'auto', text: '' }
+              ],
+              margin: [0, 6, 0, 6]
+            };
+
+            const membersTable = {
+              table: {
+                headerRows: 0,
+                widths: [50, '*', 120],
+                body: memberRows,
+                dontBreakRows: true
+              },
+              layout: {
+                hLineWidth: function (_i: any, _node: any) { return 0.5; },
+                vLineWidth: function (_i: any, _node: any) { return 0; },
+                hLineColor: function (_i: any, _node: any) { return '#E5E7EB'; },
+                paddingLeft: function (_i: any, _node: any) { return 6; },
+                paddingRight: function (_i: any, _node: any) { return 6; },
+                paddingTop: function (_i: any, _node: any) { return 6; },
+                paddingBottom: function (_i: any, _node: any) { return 6; },
+                dontBreakRows: true
+              }
+            };
+
+            const separator = { canvas: [{ type: 'line', x1: 0, y1: 0, x2: 515, y2: 0, lineWidth: 0.5, color: '#E5E7EB' }], margin: [0, 8, 0, 8] };
+
+            const teamBlock: any = {
+              stack: [teamHeader, membersTable, separator],
+              margin: [0, 6, 0, 6]
+            };
+
+            // If team is large, start it on a fresh page to avoid mid-page splitting
+            if (orderedMembers.length > 20) {
+              teamBlock.pageBreak = 'before';
+            }
+
+            docDefinition.content.push(teamBlock);
+          }
+      }
+
+      // styles for the PDF
+      docDefinition.styles = {
+        title: { fontSize: 20, bold: true, margin: [0, 0, 0, 6] },
+        subheader: { fontSize: 14, bold: true, margin: [0, 6, 0, 4] },
+        teamName: { fontSize: 12, bold: true },
+        small: { fontSize: 10, color: '#6B7280' },
+        memberName: { fontSize: 11 },
+        memberCaptain: { fontSize: 11, bold: true, color: '#92400E' }
+      };
+    }
+    try {
+      setExportingPdf(true);
+      const pdf = await loadPdfMake();
+      // sanitize images dictionary: keep only valid data:image/* entries
+      if (docDefinition.images) {
+        for (const k of Object.keys(docDefinition.images)) {
+          const v = (docDefinition.images as any)[k];
+          if (typeof v !== 'string' || !v.startsWith('data:image/')) {
+            console.warn('Removendo imagem inválida do docDefinition.images', k, v);
+            delete (docDefinition.images as any)[k];
+          }
+        }
+      }
+
+      // recursively remove or replace image references that point to missing keys
+      const cleanseImagesInNode = (node: any) => {
+        if (!node || typeof node !== 'object') return;
+        if (Array.isArray(node)) return node.forEach(cleanseImagesInNode);
+        if (node.image && typeof node.image === 'string') {
+          const imgRef = node.image;
+          const images = docDefinition.images || {};
+          const isKey = !!images[imgRef];
+          const isData = typeof imgRef === 'string' && imgRef.startsWith('data:image/');
+          if (!isKey && !isData) {
+            // Replace the image node with a safe text node and remove image-specific props
+            node.text = '';
+            delete node.image;
+            delete node.width;
+            delete node.height;
+            delete node.margin;
+          }
+        }
+        for (const key of Object.keys(node)) cleanseImagesInNode(node[key]);
+      };
+      cleanseImagesInNode(docDefinition.content);
+      pdf.createPdf(docDefinition).download(`relatorio_volunters_${Date.now()}.pdf`);
+    } catch (err) {
+      console.error('Erro gerando PDF', err);
+      alert('Erro gerando PDF');
+    } finally {
+      setExportingPdf(false);
+    }
+  };
+
+  if (!user || user.role !== 'admin') return (<div className="p-8">Acesso negado</div>);
+
+  const visibleEvents = events.filter(ev => (!selectedEventId || ev.id === selectedEventId) && (eventStatusFilter === 'all' || (ev && ev.status === eventStatusFilter)));
+  const displayedEvents = (selectedEventIds && selectedEventIds.length > 0)
+    ? events.filter(e => selectedEventIds.includes(e.id))
+    : visibleEvents;
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">Relatórios Administrativos</h1>
-          <p className="text-gray-600 mt-2">Exporte relatórios customizados com filtros, selecione seções e gere PDF profissional.</p>
-        </div>
-        <div className="flex items-center space-x-4">
-          <button onClick={exportPDF} disabled={exportingPdf} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded flex items-center space-x-2 disabled:opacity-50">
-            <Download className="w-4 h-4" />
-            <span>{exportingPdf ? 'Gerando...' : 'Exportar PDF'}</span>
+    <div className="p-6">
+      <div className="flex items-center justify-between mb-4">
+        <h1 className="text-2xl font-bold">Relatórios</h1>
+        <div className="flex items-center gap-2">
+          <select aria-label="Filtrar status do evento" value={eventStatusFilter} onChange={e => setEventStatusFilter(e.target.value)} className="border rounded px-2 py-1">
+            <option value="all">Todos os status</option>
+            <option value="published">Publicados</option>
+            <option value="in_progress">Em progresso</option>
+            <option value="draft">Rascunhos</option>
+            <option value="completed">Concluídos</option>
+          </select>
+
+          <select aria-label="Selecionar evento" value={selectedEventId || ''} onChange={e => { setSelectedEventId(e.target.value || null); setSelectedTeamId(null); }} className="border rounded px-2 py-1">
+            <option value="">Todos os eventos</option>
+            {events.map(ev => <option key={ev.id} value={ev.id || ''}>{ev.title}</option>)}
+          </select>
+
+          <select aria-label="Selecionar equipe" value={selectedTeamId || ''} onChange={e => setSelectedTeamId(e.target.value || null)} className="border rounded px-2 py-1">
+            <option value="">Todas as equipes</option>
+            {(() => {
+              const selectedEvent = events.find(ev => ev.id === selectedEventId);
+              const teams = selectedEvent ? getTeamsForEvent(selectedEvent) : (selectedEventId ? (teamDetailsByEvent[selectedEventId] ?? []) : []);
+              return (teams as any[])
+                .map(normalizeTeam)
+                .filter((nt: any) => !!nt)
+                .map((nt: any) => (
+                  <option key={nt.id || nt.name} value={nt.id || ''}>{nt.name}</option>
+                ));
+            })()}
+          </select>
+          <label className="inline-flex items-center space-x-2">
+            <input
+              aria-label="Marcar todos os eventos"
+              type="checkbox"
+              checked={displayedEvents.length > 0 && displayedEvents.every((ev: any) => selectedEventIds.includes(ev.id))}
+              onChange={() => {
+                const allIds = displayedEvents.map((ev: any) => ev.id).filter(Boolean);
+                const currentlyAll = displayedEvents.length > 0 && displayedEvents.every((ev: any) => selectedEventIds.includes(ev.id));
+                setSelectedEventIds(currentlyAll ? [] : allIds);
+              }}
+              className="form-checkbox h-4 w-4 text-blue-600"
+            />
+            <span className="text-sm text-gray-700">Marcar todos</span>
+          </label>
+          <button onClick={exportPDF} disabled={exportingPdf} className="bg-blue-600 text-white px-3 py-1 rounded inline-flex items-center">
+            <Download className="w-4 h-4 inline-block mr-2" />{exportingPdf ? 'Gerando...' : 'Exportar PDF'}
           </button>
-          {/* PDF settings removed — direct export only */}
         </div>
       </div>
 
-      {/* PDF Settings Modal */}
-      {/* PDF settings modal removed */}
+      <div>
+        {loading ? <div>Carregando...</div> : (
+          (() => {
+            // build flat list of teams to render across selected/displayed events
+              const teamsToRender: Array<{ team: any; event: any }> = ([] as any[]).concat(...displayedEvents.map((ev: any) => (getTeamsForEvent(ev) || [])
+              .map(normalizeTeam)
+              .filter((team: any) => team && (!selectedTeamId || team.id === selectedTeamId))
+              .map((team: any) => ({ team, event: ev }))));
 
-      {/* Filtros */}
-      <div className="bg-white p-6 rounded shadow border border-gray-200">
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 items-end">
-          <div>
-            <label className="text-sm font-medium text-gray-700">Evento</label>
-            <select title="Selecionar evento" value={selectedEvent || ''} onChange={(e) => setSelectedEvent(e.target.value || null)} className="w-full border border-gray-300 rounded px-3 py-2">
-              <option value="">Todos os eventos</option>
-              {events.map(ev => (
-                <option key={ev.id} value={ev.id}>{ev.title}</option>
-              ))}
-            </select>
-          </div>
+            if (teamsToRender.length === 0) return <div className="text-sm text-gray-600">Nenhuma equipe encontrada.</div>;
 
-          <div>
-            <label className="text-sm font-medium text-gray-700">Data início</label>
-            <input title="Data de início" type="date" className="w-full border border-gray-300 rounded px-3 py-2" value={dateFrom || ''} onChange={(e) => setDateFrom(e.target.value || null)} />
-          </div>
+            return (
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {teamsToRender.map(({ team, event }: any) => {
+                  // team já foi normalizada via normalizeTeam: possui id, name, status, members
+                  const membersArray = Array.isArray(team.members) ? team.members : [];
+                  const resolved: Array<{ raw: any; user: User | null }> = membersArray.map((m: any) => ({ raw: m, user: resolveMember(m, users) }));
+                  const captainId = team && team.captain && typeof team.captain === 'object' ? team.captain.id : (team.captain_id || team.captain || null);
+                  const captainEntry = resolved.find((e: any) => (e.user && (e.user as any).id && (e.user as any).id === captainId) || (e.raw && (e.raw.id === captainId || e.raw.user_id === captainId || e.raw === captainId)));
+                  const others = resolved.filter((e: any) => e !== captainEntry);
+                  const ordered = captainEntry ? [captainEntry, ...others] : [...resolved];
 
-          <div>
-            <label className="text-sm font-medium text-gray-700">Data fim</label>
-            <input title="Data de fim" type="date" className="w-full border border-gray-300 rounded px-3 py-2" value={dateTo || ''} onChange={(e) => setDateTo(e.target.value || null)} />
-          </div>
-
-          <div>
-            <label className="text-sm font-medium text-gray-700">Pesquisar</label>
-            <input type="text" className="w-full border border-gray-300 rounded px-3 py-2" placeholder="Nome ou email..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
-          </div>
-        </div>
-
-        <div className="mt-4 border-t pt-4">
-          <h4 className="font-semibold text-gray-700 flex items-center gap-2"><Filter className="w-4 h-4" /> Seções</h4>
-          <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            {sectionToggles.map(s => (
-              <label key={s.id} className="flex items-center space-x-3 p-3 border rounded cursor-pointer hover:bg-gray-50">
-                <input type="checkbox" checked={s.checked} onChange={() => toggleSection(s.id)} className="form-checkbox h-4 w-4" />
-                <span className="text-sm font-medium">{s.label}</span>
-              </label>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Preview */}
-      <div className="bg-white p-6 rounded shadow border border-gray-200">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xl font-semibold text-gray-900">Pré-visualização</h2>
-          <div className="text-sm text-gray-500">Seções selecionadas: <strong>{selectedToggles.join(', ') || 'Nenhuma'}</strong></div>
-        </div>
-
-        {/* PDF cover preview removed */}
-
-        {loading ? (
-          <div className="flex items-center justify-center py-8">
-            <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600 mr-4"></div>
-            <div className="text-gray-600">Carregando dados...</div>
-          </div>
-        ) : (
-        <div className="space-y-6">
-          {/* Users preview */}
-          {selectedToggles.includes('users') && (
-            <div>
-              <h3 className="text-lg font-medium text-gray-900 mb-2">Usuários</h3>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm text-left">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-3 py-2">
-                        <input
-                          type="checkbox"
-                          onChange={(e) => {
-                            if (e.target.checked) setSelectedUserIds(users.map(u => u.id))
-                            else setSelectedUserIds([])
-                          }}
-                          aria-label="Selecionar todos os usuários"
-                        />
-                      </th>
-                      <th className="px-3 py-2">Nome</th>
-                      <th className="px-3 py-2">Email</th>
-                      <th className="px-3 py-2">Tipo</th>
-                      <th className="px-3 py-2">Ativo</th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white">
-                    {users.filter(u => !searchTerm || u.full_name?.toLowerCase().includes(searchTerm.toLowerCase()) || u.email?.toLowerCase().includes(searchTerm.toLowerCase())).filter(u => selectedUserIds.length === 0 ? true : selectedUserIds.includes(u.id)).slice(0, 20).map(u => (
-                      <tr key={u.id} className="border-b">
-                        <td className="px-3 py-2">
-                          <input type="checkbox" checked={selectedUserIds.includes(u.id)} onChange={() => toggleSelectUser(u.id)} aria-label={`Selecionar usuário ${u.full_name}`} />
-                        </td>
-                        <td className="px-3 py-2">{u.full_name}</td>
-                        <td className="px-3 py-2">{u.email}</td>
-                        <td className="px-3 py-2">{u.role}</td>
-                        <td className="px-3 py-2">{u.is_active ? 'Sim' : 'Não'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          {/* Teams preview */}
-          {selectedToggles.includes('teams') && (
-            <div>
-              <h3 className="text-lg font-medium text-gray-900 mb-2">Equipes</h3>
-              {selectedEvent ? (
-                teams.length === 0 ? (
-                  <div className="text-sm text-gray-500">Nenhuma equipe encontrada</div>
-                ) : (
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="text-sm text-gray-700">Equipes do evento</div>
-                      <div>
-                        <label className="text-sm"><input type="checkbox" onChange={(e) => { if (e.target.checked) setSelectedTeamIds(teams.map(t => t.team_id || t.id)); else setSelectedTeamIds([]) }} /> Selecionar todos</label>
-                      </div>
-                    </div>
-                      {teams.filter(t => selectedTeamIds.length === 0 ? true : selectedTeamIds.includes(t.team_id || t.id)).map(t => (
-                        <div key={t.team_id || t.id} className="p-3 border rounded flex items-center justify-between">
-                          <div className="mr-3">
-                            <input type="checkbox" checked={selectedTeamIds.includes(t.team_id || t.id)} onChange={() => toggleSelectTeam(t.team_id || t.id)} aria-label={`Selecionar equipe ${t.team_name || t.name}`} />
-                          </div>
+                  return (
+                    <div key={team.id || team.name} className="border rounded p-3 bg-white shadow-sm">
+                      <div className="flex items-start justify-between mb-2">
                         <div>
-                          <div className="font-medium text-gray-900">{t.team_name || t.name}</div>
-                          <div className="text-sm text-gray-600">Capitão: {((t as TeamDetails).captain_name || t.captain?.full_name || '-')}{((t as TeamDetails).captain_phone || t.captain?.phone) ? ' • ' + ((t as TeamDetails).captain_phone || t.captain?.phone) : ''}</div>
+                          <div className="text-xs text-gray-500">{event?.title}</div>
+                          <div className="font-medium">{team.name || team.team_name || 'Equipe sem nome'}</div>
+                          <div className="text-sm text-gray-600">Voluntários: {ordered.length}</div>
                         </div>
-                        <div className="text-sm text-gray-600">Membros: {t.members?.length || t.current_volunteers || 0}</div>
+                        <div>
+                          <label className="inline-flex items-center space-x-2">
+                            <input aria-label={`Selecionar evento ${event?.title || ''}`} type="checkbox" checked={selectedEventIds.includes(event.id)} onChange={() => setSelectedEventIds(prev => prev.includes(event.id) ? prev.filter(x => x !== event.id) : [...prev, event.id])} className="form-checkbox h-4 w-4 text-blue-600" />
+                          </label>
+                        </div>
                       </div>
-                      ))}
-                      {/* Member list compact */}
-                      {teams.filter(t => selectedTeamIds.length === 0 ? true : selectedTeamIds.includes(t.team_id || t.id)).map(t => (
-                        <div className="px-3" key={(t.team_id || t.id) + '_members'}>
-                          {Array.isArray(t.members) && t.members.length > 0 ? (
-                            <>
-                              <div className="text-sm text-gray-700 mt-1">{(t.members as (TeamMember & { phone?: string })[]).slice(0, 4).map(m => `${m.full_name}${m.phone || m.user?.phone ? ' | ' + (m.phone || m.user?.phone) : ''}`).join(', ')}{(t.members as TeamMember[]).length > 4 ? '...' : ''}</div>
-                              <div className="mt-2">
-                                <button className="text-sm text-blue-600" onClick={() => toggleExpandTeam(t.team_id || t.id)}>
-                                  {expandedTeamIds.includes(t.team_id || t.id) ? 'Ocultar membros' : 'Ver membros'}
-                                </button>
-                                {expandedTeamIds.includes(t.team_id || t.id) && (
-                                  <div className="mt-2 text-sm text-gray-700 space-y-1">
-                                    {(t.members as TeamMember[]).map(m => (
-                                      <div key={m.user_id} className="flex items-center gap-2">
-                                        <div className="font-medium">{m.full_name}</div>
-                                        <div className="text-xs text-gray-500">{m.role_in_team}{((m as TeamMember & { phone?: string }).phone || m.user?.phone) ? ' • ' + (((m as TeamMember & { phone?: string }).phone || m.user?.phone)) : ''}</div>
-                                      </div>
-                                    ))}
-                                  </div>
-                                )}
+
+                      <div className="mt-2 space-y-2">
+                        {(ordered || []).map(({ raw, user }: any) => {
+                          const memberRec = raw;
+                          const member = user || (raw && raw.user) || resolveMember(raw, users);
+                          const status = memberRec?.status ?? 'active';
+                          if (status !== 'active') return null;
+                          const roleInTeam = (memberRec && memberRec.role_in_team) || (member && ((member as any).role_in_team || (member as any).role)) || 'volunteer';
+                          const phone = (member as any)?.phone || (member as any)?.phone_number || null;
+                          const waLink = phone ? formatWhatsappLink(phone, { message: `Olá ${member?.full_name || ''}, você foi alocado(a) na equipe ${team?.name || team?.team_name || ''}`, eventLocation: (event as any)?.location }) : null;
+                          const avatar = (member as any)?.profile_image_url || (member as any)?.avatar_url || (member as any)?.image || (member as any)?.photo_url || null;
+                          return (
+                            <div key={(member as any)?.id || JSON.stringify(memberRec)} className="flex items-center space-x-3 bg-gray-50 rounded p-2">
+                              {avatar ? (
+                                <img src={avatar} alt={member?.full_name || 'avatar'} className="w-10 h-10 rounded-full object-cover" onError={(e: any) => { e.currentTarget.style.display = 'none'; }} />
+                              ) : (
+                                <div className="w-10 h-10 rounded-full bg-transparent" />
+                              )}
+                              <div className="flex-1">
+                                <div className="flex items-center justify-between">
+                                  <p className="font-medium text-gray-900">{member?.full_name || memberRec?.name || 'Nome não disponível'}</p>
+                                  <span className="text-xs text-gray-500">{getRoleEmoji(roleInTeam)} {displayRole(roleInTeam)}</span>
+                                </div>
+                                <div className="flex items-center space-x-3 mt-2">
+                                  <p className="text-sm text-gray-600">{phone || 'Telefone não informado'}</p>
+                                  {phone && waLink && (
+                                    <a href={waLink} target="_blank" rel="noopener noreferrer" className="inline-flex items-center text-sm text-green-600 hover:text-green-800 bg-green-50 px-2 py-1 rounded-md">
+                                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" className="w-4 h-4 mr-1" fill="currentColor"><path d="M20.52 3.48A11.88 11.88 0 0012 .02C5.53.02.53 5.01.53 11.49c0 2.03.54 4.02 1.57 5.78L.02 23.5l6.43-1.65A11.41 11.41 0 0012 23c6.47 0 11.47-4.99 11.47-11.48 0-3.07-1.21-5.94-3.95-8.04zM12 21.36c-1.14 0-2.25-.31-3.21-.9l-.23-.13-3.82.98.98-3.72-.14-.24A9.04 9.04 0 013 11.5C3 6.26 7.1 2.16 12.34 2.16c2.63 0 5.11 1.03 6.97 2.88 1.86 1.86 2.88 4.34 2.88 6.96 0 5.25-4.1 9.35-9.37 9.35z" /></svg>
+                                      WhatsApp
+                                    </a>
+                                  )}
+                                </div>
                               </div>
-                            </>
-                          ) : null}
-                        </div>
-                      ))}
-                    
-                  </div>
-                )
-              ) : (
-                <div className="text-sm text-gray-500">Selecione um evento para ver as equipes.</div>
-              )}
-            </div>
-          )}
-
-          {/* Event stats preview */}
-          {selectedToggles.includes('eventStats') && (
-            <div>
-              <h3 className="text-lg font-medium text-gray-900 mb-2">Estatísticas do Evento</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {(selectedEvent ? events.filter(e => e.id === selectedEvent) : events).map(ev => (
-                  <div key={ev.id} className="p-3 border rounded">
-                    <div className="font-medium text-gray-900 mb-1">{ev.title}</div>
-                    <div className="text-xs text-gray-500">{ev.event_date?.slice(0, 10)}</div>
-
-                    <div className="mt-3 space-y-1 text-sm text-gray-700">
-                      <div>Total equipes: {ev.teams?.length || 0}</div>
-                      <div>Total voluntários: {ev.teams?.reduce((acc: number, t: TeamType) => acc + (t.current_volunteers || 0), 0) || 0}</div>
-                      <div>Capacidade: {ev.max_volunteers ? `${ev.teams?.reduce((acc: number, t: TeamType) => acc + (t.current_volunteers || 0), 0)}/${ev.max_volunteers}` : '-'}</div>
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
-            </div>
-          )}
-
-          {/* Evaluations preview */}
-          {selectedToggles.includes('evaluations') && (
-            <div>
-              <h3 className="text-lg font-medium text-gray-900 mb-2">Avaliações (Visão Geral)</h3>
-              <div className="text-sm text-gray-600">Média geral, contagem de avaliações e principais comentários — obtidos via view ou agregação.</div>
-            </div>
-          )}
-        </div>
+            );
+          })()
         )}
       </div>
     </div>
-  )
-}
+  );
+};
 
-export default AdminReports
+export default AdminReports;
+export { AdminReports };
