@@ -45,7 +45,7 @@ const AdminReports: React.FC = () => {
   const [exportingPdf, setExportingPdf] = useState(false);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [selectedEventIds, setSelectedEventIds] = useState<string[]>([]);
-  const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
+  const [selectedTeamIds, setSelectedTeamIds] = useState<string[]>([]);
   const [eventStatusFilter, setEventStatusFilter] = useState<string>('all');
   const [teamDetailsByEvent, setTeamDetailsByEvent] = useState<Record<string, any[]>>({});
 
@@ -164,6 +164,7 @@ const AdminReports: React.FC = () => {
   const exportPDF = async () => {
     const docDefinition: any = {
       pageSize: 'A4',
+      pageOrientation: 'portrait',
       pageMargins: [40, 40, 40, 40],
       content: [],
       styles: { title: { fontSize: 18, bold: true } }
@@ -173,12 +174,67 @@ const AdminReports: React.FC = () => {
       : (selectedEventId ? events.filter(e => e.id === selectedEventId) : events);
 
     // helper to fetch image and convert to dataURL (cached)
+    const placeholderKey = '/placeholder-avatar.png';
     const imageCache = new Map<string, string | null>();
+
+    // convert a raster image dataURL into a circular PNG dataURL using canvas
+    const convertToCircularDataUrl = async (dataUrl: string, size = 96) => {
+      try {
+        return await new Promise<string>((resolve, reject) => {
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          img.onload = () => {
+            try {
+              const canvas = document.createElement('canvas');
+              canvas.width = size;
+              canvas.height = size;
+              const ctx = canvas.getContext('2d');
+              if (!ctx) return reject(new Error('Canvas not supported'));
+              // draw circular clipping
+              ctx.clearRect(0, 0, size, size);
+              ctx.save();
+              ctx.beginPath();
+              ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2, true);
+              ctx.closePath();
+              ctx.clip();
+              // draw image covering the canvas while preserving aspect ratio (cover)
+              const ratio = Math.max(size / img.width, size / img.height);
+              const w = img.width * ratio;
+              const h = img.height * ratio;
+              const dx = (size - w) / 2;
+              const dy = (size - h) / 2;
+              ctx.drawImage(img, dx, dy, w, h);
+              ctx.restore();
+              const png = canvas.toDataURL('image/png');
+              resolve(png);
+            } catch (e) {
+              reject(e);
+            }
+          };
+          img.onerror = () => reject(new Error('Image load error'));
+          img.src = dataUrl;
+        });
+      } catch (e) {
+        console.warn('Falha ao converter imagem para circular:', e);
+        throw e;
+      }
+    };
     const failedImageLogs: Array<{ url: string; reason: string; error?: any }> = [];
-    const fetchImageAsDataUrl = async (url?: string | null) => {
+    const fetchImageAsDataUrl = async (url?: string | null, makeCircular = false) => {
       if (!url) return null;
       // If it's already a data URL, use it directly
       if (typeof url === 'string' && url.startsWith('data:')) {
+        // Optionally convert inline data images to circular
+        if (makeCircular && url.startsWith('data:image/')) {
+          try {
+            const circ = await convertToCircularDataUrl(url, 128);
+            imageCache.set(url, circ);
+            return circ;
+          } catch (e) {
+            imageCache.set(url, url);
+            return url;
+          }
+        }
         imageCache.set(url, url);
         return url;
       }
@@ -222,9 +278,20 @@ const AdminReports: React.FC = () => {
             return dataUrl; // fallback to original
           }
         })() : dataUrl;
+        // optionally convert raster images to circular avatars (avoid placeholder)
+        let cachedResult = finalDataUrl;
+        if (makeCircular && typeof finalDataUrl === 'string' && finalDataUrl.startsWith('data:image/') && url !== placeholderKey) {
+          try {
+            cachedResult = await convertToCircularDataUrl(finalDataUrl, 128);
+          } catch (e) {
+            // fallback to original finalDataUrl
+            failedImageLogs.push({ url: String(url), reason: 'circular-conversion-failed', error: e });
+            cachedResult = finalDataUrl;
+          }
+        }
         // store final (possibly converted) data URL
-        imageCache.set(url, finalDataUrl);
-        return finalDataUrl;
+        imageCache.set(url, cachedResult);
+        return cachedResult;
       } catch (err) {
         console.warn('Não foi possível carregar imagem para PDF:', url, err);
         failedImageLogs.push({ url: String(url), reason: 'fetch-or-read-failed', error: err });
@@ -236,7 +303,6 @@ const AdminReports: React.FC = () => {
     // prefetch unique avatars used in the targeted events, applying current filters
     const avatarUrls = new Set<string>();
     // also prefetch a local placeholder image (if available) so we can embed it when a member has no avatar
-    const placeholderKey = '/placeholder-avatar.png';
     const getTeamsForEvent = (ev: any) => {
       const evTeamsRaw: any[] = (ev as any).teams || [];
       const hasMembersInEvTeams = evTeamsRaw.some(t => Array.isArray(t.members) && t.members.length > 0) || evTeamsRaw.some(t => Array.isArray(t.team_members) && t.team_members.length > 0);
@@ -247,8 +313,9 @@ const AdminReports: React.FC = () => {
     for (const ev of targetEvents) {
       const evTeams: any[] = getTeamsForEvent(ev);
       for (const team of evTeams) {
-        if (selectedTeamId && team.id !== selectedTeamId) continue;
-        const members = Array.isArray((team as any).members) ? (team as any).members : (Array.isArray((team as any).team_members) ? (team as any).team_members : (Array.isArray((team as any).members_list) ? (team as any).members_list : []));
+        const nt = normalizeTeam(team) || team;
+        if (selectedTeamIds.length > 0 && !selectedTeamIds.includes(String(nt.id))) continue;
+        const members = Array.isArray((nt as any).members) ? (nt as any).members : (Array.isArray((nt as any).team_members) ? (nt as any).team_members : (Array.isArray((nt as any).members_list) ? (nt as any).members_list : []));
         for (const m of members) {
           const member = resolveMember(m, users);
           const avatar = (member as any)?.profile_image_url || (member as any)?.avatar_url || (member as any)?.image || (member as any)?.photo_url || null;
@@ -256,14 +323,15 @@ const AdminReports: React.FC = () => {
         }
       }
     }
-    // ensure placeholder is available in the cache
+    // ensure placeholder is available in the cache (don't circularize placeholder)
     try {
-      await fetchImageAsDataUrl(placeholderKey);
+      await fetchImageAsDataUrl(placeholderKey, false);
       avatarUrls.add(placeholderKey);
     } catch (e) {
-    // ignore if placeholder not found
+      // ignore if placeholder not found
     }
-    await Promise.all(Array.from(avatarUrls).map(u => fetchImageAsDataUrl(u)));
+    // prefetch avatars: convert to circular for real avatar URLs (not placeholder)
+    await Promise.all(Array.from(avatarUrls).map(u => fetchImageAsDataUrl(u, u !== placeholderKey)));
     const placeholderDataUri = imageCache.get(placeholderKey) || null;
 
     // Build images dictionary for pdfMake and a map from original url -> image key
@@ -310,12 +378,15 @@ const AdminReports: React.FC = () => {
       for (const ev of targetEvents) {
         docDefinition.content.push({ text: ev.title || '-', margin: [0, 8, 0, 6], style: 'subheader' });
         const evTeams: any[] = getTeamsForEvent(ev);
+        // build card wrappers for this event and then layout as grid (3 columns)
+        const eventCardWrappers: any[] = [];
           for (const team of evTeams) {
-            if (selectedTeamId && team.id !== selectedTeamId) continue;
+            const nt = normalizeTeam(team) || team;
+            if (selectedTeamIds.length > 0 && !selectedTeamIds.includes(String(nt.id))) continue;
 
-            const members = Array.isArray((team as any).members) ? (team as any).members : (Array.isArray((team as any).team_members) ? (team as any).team_members : (Array.isArray((team as any).members_list) ? (team as any).members_list : []));
+            const members = Array.isArray((nt as any).members) ? (nt as any).members : (Array.isArray((nt as any).team_members) ? (nt as any).team_members : (Array.isArray((nt as any).members_list) ? (nt as any).members_list : []));
             const resolvedMembers: Array<{ raw: any; user: User | null }> = members.map((m: any) => ({ raw: m, user: resolveMember(m, users) }));
-            const captainIdLocal = team && team.captain && typeof team.captain === 'object' ? team.captain.id : (team.captain_id || team.captain);
+            const captainIdLocal = nt && nt.captain && typeof nt.captain === 'object' ? nt.captain.id : (nt.captain_id || nt.captain);
             const captainEntryLocal = resolvedMembers.find((e: { raw: any; user: User | null }) => (e.user && (e.user as any).id && (e.user as any).id === captainIdLocal) || (e.raw && (e.raw.id === captainIdLocal || e.raw.user_id === captainIdLocal || e.raw === captainIdLocal)));
             const orderedMembers = captainEntryLocal ? [captainEntryLocal, ...resolvedMembers.filter((e: { raw: any; user: User | null }) => e !== captainEntryLocal)] : resolvedMembers;
 
@@ -340,58 +411,110 @@ const AdminReports: React.FC = () => {
               memberRows.push([{ stack: [photoCell] }, nameCell, phoneCell]);
             }
 
-            // Team block as a single stack so pdfMake attempts to keep it together where possible
-            const teamHeader = {
-              columns: [
-                { width: '*', stack: [{ text: `Equipe: ${team.name || team.team_name || '-'}`, style: 'teamName' }, { text: `Voluntários: ${orderedMembers.length}`, style: 'small' }, (team.arrival_time ? { text: `Chegada: ${String(team.arrival_time).slice(0, 5)}`, style: 'small' } : null)] },
-                { width: 'auto', text: '' }
-              ],
-              margin: [0, 6, 0, 6]
-            };
+            // Modern card layout for team: header + member rows as styled items
+            const memberItems: any[] = [];
+            // colors by status (palette: laranja e preto) - use normalized team `nt`
+            const teamStatus = (nt && (nt.status || nt.team_status)) || 'unknown';
+            const accentColor = teamStatus === 'published' ? '#F97316' /* orange-500 */ : teamStatus === 'in_progress' ? '#111827' /* black */ : teamStatus === 'draft' ? '#9CA3AF' /* gray */ : teamStatus === 'completed' ? '#000000' : '#6B7280';
+            for (const entry of orderedMembers) {
+              const m = entry.raw;
+              const member = entry.user || (m && m.user) || null;
+              const phone = (member as any)?.phone || (member as any)?.phone_number || '';
+              const avatar = (member as any)?.profile_image_url || (member as any)?.avatar_url || (member as any)?.image || (member as any)?.photo_url || null;
+              const imageKey = avatar && urlToImageKey.has(avatar) ? urlToImageKey.get(avatar) : (placeholderKeyName || null);
+              const isCaptain = !!member && ((member as any).id === captainIdLocal);
 
-            const membersTable = {
+              const photoObj = imageKey ? { image: imageKey, width: 44, height: 44, margin: [0, 0, 6, 0] } : { text: '', width: 44 };
+              const nameText = (member as any)?.full_name || (m && (m.name || m.user?.full_name)) || '-';
+              const waNumber = formatPhoneForWa(phone as any);
+              const phoneNode = waNumber ? { text: phone || '-', link: `https://wa.me/${waNumber}`, color: '#1D9B58' } : (phone || '-');
+
+              memberItems.push({
+                columns: [
+                  { width: 48, stack: [photoObj] },
+                  { width: '*', stack: [{ text: nameText + (isCaptain ? '  (Capitão)' : ''), style: isCaptain ? 'memberCaptain' : 'memberName' }, { text: displayRole((m && m.role_in_team) || (member && (member as any).role) || 'volunteer'), style: 'small' }] },
+                  { width: 100, text: phoneNode, alignment: 'right' }
+                ],
+                margin: [0, 4, 0, 4]
+              });
+            }
+
+            // build a card-like container using a two-column table: small colored stripe + content
+            const cardTable = {
               table: {
-                headerRows: 0,
-                widths: [50, '*', 120],
-                body: memberRows,
-                dontBreakRows: true
+                widths: [4, '*'],
+                body: [
+                  [
+                    { text: '', fillColor: accentColor, margin: [0, 0, 0, 0], border: [false, false, false, false] },
+                    {
+                      stack: [
+                        { columns: [{ width: '*', stack: [{ text: `Equipe: ${nt.name || nt.team_name || '-'}`, style: 'teamCardTitle', color: (accentColor === '#111827' || accentColor === '#000000') ? '#FFFFFF' : '#111827' }] }, { width: 'auto', text: `${orderedMembers.length} voluntários`, style: 'teamCardMeta', alignment: 'right', color: (accentColor === '#111827' || accentColor === '#000000') ? '#FFFFFF' : '#6B7280' }], margin: [6, 4, 6, 4] },
+                        { stack: memberItems }
+                      ],
+                      fillColor: '#ffffff'
+                    }
+                  ]
+                ]
               },
               layout: {
                 hLineWidth: function (_i: any, _node: any) { return 0.5; },
-                vLineWidth: function (_i: any, _node: any) { return 0; },
-                hLineColor: function (_i: any, _node: any) { return '#E5E7EB'; },
-                paddingLeft: function (_i: any, _node: any) { return 6; },
-                paddingRight: function (_i: any, _node: any) { return 6; },
-                paddingTop: function (_i: any, _node: any) { return 6; },
-                paddingBottom: function (_i: any, _node: any) { return 6; },
-                dontBreakRows: true
+                vLineWidth: function () { return 0; },
+                hLineColor: function () { return '#E5E7EB'; },
+                paddingLeft: function () { return 4; },
+                paddingRight: function () { return 4; },
+                paddingTop: function () { return 4; },
+                paddingBottom: function () { return 4; }
               }
             };
 
-            const separator = { canvas: [{ type: 'line', x1: 0, y1: 0, x2: 515, y2: 0, lineWidth: 0.5, color: '#E5E7EB' }], margin: [0, 8, 0, 8] };
-
-            const teamBlock: any = {
-              stack: [teamHeader, membersTable, separator],
-              margin: [0, 6, 0, 6]
+            const cardWrapper: any = {
+              stack: [cardTable],
+              margin: [0, 4, 0, 4]
             };
 
-            // If team is large, start it on a fresh page to avoid mid-page splitting
             if (orderedMembers.length > 20) {
-              teamBlock.pageBreak = 'before';
+              cardWrapper.pageBreak = 'before';
             }
 
-            docDefinition.content.push(teamBlock);
+          eventCardWrappers.push(cardWrapper);
+        }
+        // now layout the event cards into rows of up to 3 columns
+        const colsPerRow = 4;
+        let buffer: any[] = [];
+        const flushBuffer = () => {
+          if (buffer.length === 0) return;
+          // create a columns row (more compact)
+          docDefinition.content.push({ columns: buffer.map((c: any) => ({ width: '*', stack: [c] })), columnGap: 6, margin: [0, 2, 0, 2] });
+          buffer = [];
+        };
+
+        for (const cw of eventCardWrappers) {
+          if (cw.pageBreak) {
+            // flush any buffered cards first
+            flushBuffer();
+            // push the large card as full width (it already has pageBreak)
+            docDefinition.content.push(cw);
+            continue;
           }
+          buffer.push(cw);
+          if (buffer.length >= colsPerRow) {
+            flushBuffer();
+          }
+        }
+        // flush remaining
+        flushBuffer();
       }
 
       // styles for the PDF
       docDefinition.styles = {
-        title: { fontSize: 20, bold: true, margin: [0, 0, 0, 6] },
-        subheader: { fontSize: 14, bold: true, margin: [0, 6, 0, 4] },
+        title: { fontSize: 18, bold: true, margin: [0, 0, 0, 6] },
+        subheader: { fontSize: 13, bold: true, margin: [0, 6, 0, 4] },
         teamName: { fontSize: 12, bold: true },
-        small: { fontSize: 10, color: '#6B7280' },
-        memberName: { fontSize: 11 },
-        memberCaptain: { fontSize: 11, bold: true, color: '#92400E' }
+        teamCardTitle: { fontSize: 12, bold: true },
+        teamCardMeta: { fontSize: 9, color: '#6B7280' },
+        small: { fontSize: 9, color: '#6B7280' },
+        memberName: { fontSize: 10 },
+        memberCaptain: { fontSize: 10, bold: true, color: '#92400E' }
       };
     }
     try {
@@ -458,12 +581,12 @@ const AdminReports: React.FC = () => {
             <option value="completed">Concluídos</option>
           </select>
 
-          <select aria-label="Selecionar evento" value={selectedEventId || ''} onChange={e => { setSelectedEventId(e.target.value || null); setSelectedTeamId(null); }} className="border rounded px-2 py-1">
+          <select aria-label="Selecionar evento" value={selectedEventId || ''} onChange={e => { setSelectedEventId(e.target.value || null); setSelectedTeamIds([]); }} className="border rounded px-2 py-1">
             <option value="">Todos os eventos</option>
             {events.map(ev => <option key={ev.id} value={ev.id || ''}>{ev.title}</option>)}
           </select>
 
-          <select aria-label="Selecionar equipe" value={selectedTeamId || ''} onChange={e => setSelectedTeamId(e.target.value || null)} className="border rounded px-2 py-1">
+          <select aria-label="Selecionar equipe" value={selectedTeamIds[0] || ''} onChange={e => setSelectedTeamIds(e.target.value ? [e.target.value] : [])} className="border rounded px-2 py-1">
             <option value="">Todas as equipes</option>
             {(() => {
               const selectedEvent = events.find(ev => ev.id === selectedEventId);
@@ -502,7 +625,7 @@ const AdminReports: React.FC = () => {
             // build flat list of teams to render across selected/displayed events
               const teamsToRender: Array<{ team: any; event: any }> = ([] as any[]).concat(...displayedEvents.map((ev: any) => (getTeamsForEvent(ev) || [])
               .map(normalizeTeam)
-              .filter((team: any) => team && (!selectedTeamId || team.id === selectedTeamId))
+                .filter((team: any) => team && (selectedTeamIds.length === 0 || selectedTeamIds.includes(String(team.id))))
               .map((team: any) => ({ team, event: ev }))));
 
             if (teamsToRender.length === 0) return <div className="text-sm text-gray-600">Nenhuma equipe encontrada.</div>;
@@ -528,7 +651,13 @@ const AdminReports: React.FC = () => {
                         </div>
                         <div>
                           <label className="inline-flex items-center space-x-2">
-                            <input aria-label={`Selecionar evento ${event?.title || ''}`} type="checkbox" checked={selectedEventIds.includes(event.id)} onChange={() => setSelectedEventIds(prev => prev.includes(event.id) ? prev.filter(x => x !== event.id) : [...prev, event.id])} className="form-checkbox h-4 w-4 text-blue-600" />
+                            <input
+                              aria-label={`Selecionar equipe ${team?.name || ''}`}
+                              type="checkbox"
+                              checked={selectedTeamIds.includes(String(team?.id))}
+                              onChange={() => setSelectedTeamIds(prev => (prev.includes(String(team?.id)) ? prev.filter(x => x !== String(team?.id)) : [...prev, String(team?.id)]))}
+                              className="form-checkbox h-4 w-4 text-blue-600"
+                            />
                           </label>
                         </div>
                       </div>
