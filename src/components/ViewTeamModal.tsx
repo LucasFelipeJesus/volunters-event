@@ -15,6 +15,18 @@ interface Props {
 export const ViewTeamModal: React.FC<Props> = ({ teamId, open, onClose }) => {
     const [team, setTeam] = useState<Team | null>(null)
     const [loading, setLoading] = useState(false)
+    const activeMembers = (team?.members ?? [])
+        .filter((m) => m.status === 'active')
+        .sort((a, b) => {
+            const roleRank = (r: string | null | undefined) => (r === 'captain' ? 0 : 1)
+            const ra = roleRank(a.role_in_team)
+            const rb = roleRank(b.role_in_team)
+            if (ra !== rb) return ra - rb
+
+            const na = (a.user?.full_name || '').toLowerCase()
+            const nb = (b.user?.full_name || '').toLowerCase()
+            return na.localeCompare(nb)
+        })
 
     useEffect(() => {
         const fetch = async () => {
@@ -71,10 +83,8 @@ export const ViewTeamModal: React.FC<Props> = ({ teamId, open, onClose }) => {
                             <div>
                                 <h4 className="font-medium text-gray-800">Membros</h4>
                                 <div className="mt-2 space-y-2">
-                                    {(team?.members ?? []).length > 0 ? (
-                                        (team?.members ?? [])
-                                            .filter((m) => m.status === 'active')
-                                            .map((m) => (
+                                    {activeMembers.length > 0 ? (
+                                        activeMembers.map((m) => (
                                             <div key={m.id} className="flex items-center space-x-3 bg-gray-50 rounded p-2">
                                                     {(m.user?.profile_image_url || m.user?.avatar_url) ? (
                                                         <img src={m.user?.profile_image_url || m.user?.avatar_url} alt={m.user?.full_name} className="w-10 h-10 rounded-full object-cover" onError={(e: any) => { e.currentTarget.style.display = 'none'; }} />

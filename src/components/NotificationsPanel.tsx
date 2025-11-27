@@ -91,7 +91,7 @@ export const NotificationsPanel: React.FC = () => {
                                 <div
                                     key={n.id}
                                     onClick={() => handleOpenNotification(n)}
-                                    className={`w-full text-left p-3 border-b border-gray-50 hover:bg-gray-50 ${n.read ? 'bg-white' : 'bg-gray-50'}`}
+                                        className={`w-full text-left p-3 border-b border-gray-50 hover:bg-gray-50 ${n.read ? 'bg-white' : 'bg-blue-50 ring-1 ring-blue-100'}`}
                                 >
                                     <div className="flex items-center justify-between">
                                         <div className="flex items-center space-x-3">
@@ -106,7 +106,10 @@ export const NotificationsPanel: React.FC = () => {
                                             )}
 
                                             <div className="flex-1">
-                                                <p className="text-sm font-medium text-gray-900">{n.title}</p>
+                                                    <div className="flex items-center">
+                                                        {!n.read && <span className="inline-block w-2 h-2 bg-blue-600 rounded-full mr-2" aria-hidden="true" />}
+                                                        <p className={`text-sm ${n.read ? 'font-medium text-gray-900' : 'font-semibold text-gray-900'}`}>{n.title}</p>
+                                                    </div>
                                                 <p className="text-xs text-gray-500 break-words whitespace-normal">{n.message}</p>
 
                                                 {n.related_user && (
