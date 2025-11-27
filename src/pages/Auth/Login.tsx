@@ -24,6 +24,7 @@ export const Login: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
+  const [infoMessage, setInfoMessage] = useState<string | null>(null)
 
   const from = location.state?.from?.pathname || '/'
   const emailFromRegister = location.state?.email || ''
@@ -49,6 +50,13 @@ export const Login: React.FC = () => {
       setValue('email', emailFromRegister)
     }
   }, [messageFromRegister, emailFromRegister, setValue])
+
+  // Limpa mensagens informativas automaticamente
+  useEffect(() => {
+    if (!infoMessage) return
+    const t = setTimeout(() => setInfoMessage(null), 8000)
+    return () => clearTimeout(t)
+  }, [infoMessage])
 
   const onSubmit = async (data: FormData) => {
     setIsLoading(true)
@@ -119,6 +127,17 @@ export const Login: React.FC = () => {
             </div>
           )}
 
+          {infoMessage && (
+            <div className="bg-blue-50 border border-blue-200 rounded-md p-4">
+              <div className="flex">
+                <AlertCircle className="h-5 w-5 text-blue-400" />
+                <div className="ml-3">
+                  <p className="text-sm text-blue-700">{infoMessage}</p>
+                </div>
+              </div>
+            </div>
+          )}
+
           {error && (
             <div className="bg-red-50 border border-red-200 rounded-md p-4">
               <div className="flex">
@@ -175,12 +194,16 @@ export const Login: React.FC = () => {
 
           <div className="flex items-center justify-between">
             <div className="text-sm">
-              <Link
-                to="/forgot-password"
+              <button
+                type="button"
+                onClick={() => {
+                  // Mostra instrução para contatar o administrador (telefone não exibido)
+                  setInfoMessage('Para recuperar a senha, entre em contato com o administrador.')
+                }}
                 className="font-medium text-blue-600 hover:text-blue-500 transition-colors"
               >
                 Esqueceu sua senha?
-              </Link>
+              </button>
             </div>
           </div>
 
